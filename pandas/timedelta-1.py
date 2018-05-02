@@ -1,5 +1,5 @@
-#!/usr/bin/env python"""Divede the zone in the following
-"""See the diagram, I divided the window into 6 zones by 8AM and 8PM on 
+#!/usr/bin/env python
+"""See the diagram, the window has been divided into 6 zones by 8AM and 8PM on 
 1-2 consecutive days depends on the adjusted start-time and end-time which
 I will discuss below:
 
@@ -42,7 +42,12 @@ Case-3: `ts`, `te` in different days, if `ts` in z1, then `te` must be in z4
 Case-4: `ts` in [z2, z3] while `te` in [z4, z5]
    total = min(a8, te) - max(p8, ts)  
 
+REF:https://stackoverflow.com/questions/50124353/optimized-method-for-dataframes-to-find-time-range-overlaps-with-specified-hou/50143130#50143130
+
+XiCheng Jia, May 2, 2018 @ New York
+Environment: Python 3.6.4, Pandas 0.22.0
 """
+
 import pandas as pd
 from io import StringIO
 
