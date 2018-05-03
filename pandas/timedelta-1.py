@@ -1,5 +1,11 @@
 #!/usr/bin/env python
-"""See the diagram, the window has been divided into 6 zones by 8AM and 8PM on 
+"""Problem: The user wanted to sum the total time visitors spent in a location 
+between 8PM and 8AM the next day. each line of records has two timestamps:
+`t1` as arrival time and `t2` as departure time. t1 and t2 can span multiple 
+days. 
+REF:https://stackoverflow.com/questions/50124353/optimized-method-for-dataframes-to-find-time-range-overlaps-with-specified-hou/50143130#50143130
+
+See the diagram, the window has been divided into 6 zones by 8AM and 8PM on 
 1-2 consecutive days depends on the adjusted start-time and end-time which
 I will discuss below:
 
@@ -26,7 +32,7 @@ Also set:
  - `a8` the same day as `te` but at 8AM
 
 Case-1: `ts` and `te` in the same day - basically in `day2` and `p8 > a8`
-   if both in the same zone: z4 or z6: 
+   if both in the same zone: z4(te < a8) or z6(ts > p8): 
       total = te - ts
    else:
       total = max(0, te - p8) + max(0, a8 - ts)
@@ -41,8 +47,6 @@ Case-3: `ts`, `te` in different days, if `ts` in z1, then `te` must be in z4
 
 Case-4: `ts` in [z2, z3] while `te` in [z4, z5]
    total = min(a8, te) - max(p8, ts)  
-
-REF:https://stackoverflow.com/questions/50124353/optimized-method-for-dataframes-to-find-time-range-overlaps-with-specified-hou/50143130#50143130
 
 XiCheng Jia, May 2, 2018 @ New York
 Environment: Python 3.6.4, Pandas 0.22.0
@@ -87,8 +91,10 @@ def count_off_hour_in_ns(x):
     # define the start-time(ts) and end-time(te) of the window
     ts = t1 + pd.Timedelta('{} days'.format(delta_days))
     te = t2
+
     # 8PM the same day as ts
     p8 = ts.replace(hour=20, minute=0, second=0)
+
     # 8AM the same day as te
     a8 = te.replace(hour=8, minute=0, second=0)
 
