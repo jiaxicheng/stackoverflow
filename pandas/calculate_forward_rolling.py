@@ -3,6 +3,8 @@
 but not the left end. If you want to calculate a forward rolling() statistics i.e. the sum(), you will need 
 to do some tricks. 
 
+REF: https://stackoverflow.com/questions/49973183/creating-new-columns-given-if-an-event-happen-in-a-window-of-time-future-or-pas/50107431#50107431
+
 Method-1: 
     Calculate the rolling in the regular backward way and then assign the values to .shift(1-d) where 
     'd' is the window size. the problem for this approach is the last (d-1) rows will have NaN values 
@@ -20,7 +22,6 @@ Method-2:
 
 In the following stackoverflow case, OP wanted to check visiting status (True/False) in the next `d` days' window. 
 
-REF: https://stackoverflow.com/questions/49973183/creating-new-columns-given-if-an-event-happen-in-a-window-of-time-future-or-pas/50107431#50107431
 
 XiCheng Jia Apr 30, 2018 @ New York
 Environment: Pandas 0.22.0, Python 3.6.4
