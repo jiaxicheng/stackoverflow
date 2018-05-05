@@ -11,13 +11,13 @@
 For each userID, select from feature0 to feature3 and dayID from 0 to 2, every dayID
 and feature must be selected at least once.
 
-The problem can be divided into the following items: 
+The problem can also be descripted as follows:
 (1) Given an 3*4 zeros 2-D array np.zeros((3,4)) and 4 '1', you need to fill '1' into this 
 zeros array, so that the sum of every row and evry column is greater than '0'. 
-(2) You will then need to find the indices of these '1' and retrieve the values on these 
+(2) You will then find the indices of these '1' and retrieve the values on these 
 indices(not '1' in the actual problems)
 
-The real problems might contains 300+ dayID, 1000+ features for each users. so performance
+The real problems might contains 100+ dayID, 1000+ features for each users. so performance
 is another consideration.
 
 The following code works on the 3*4 matrix for each userID:
