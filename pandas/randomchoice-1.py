@@ -55,19 +55,19 @@ gh3      2         4       9.0        12        15
 df = pd.read_table(StringIO(str), sep='\s+')
 
 def randx(dfg):
-    # create a list and make sure 0,1,2 all in so that all rows are covered
+    # create a list and make sure 0,1,2 all in so that all DayIDs are covered
     # the last one is randomly slected from 0,1,2
     x = [ 0, 1, 2, np.random.randint(3) ]
 
     # shuffle the list 
     np.random.shuffle(x)
 
-    # enumerate the columns and each column gets a row index from the list-x, 
-    # so we can map to the actual element in the dataframe. the 2 in enumerate 
+    # enumerate list-x, with the row-index and the counter aligned with the column-index,
+    # to retrieve the actual element in the dataframe. the 2 in enumerate
     # is to skip the first two columns which are 'userID' and 'dayID'
     return pd.Series([ dfg.iat[j,i] for i,j in enumerate(x,2) ])
 
-    ## below return the list of result into one column
+    ## you can also return the list of result into one column
     #return [ dfg.iat[j,i] for i,j in enumerate(x,2) ]
 
 def feature_name(x): 
@@ -76,8 +76,8 @@ def feature_name(x):
 # if you have many irrelevant columns, then
 # retrieve only columns required for calculations
 # if you have 1000+ columns(features) and all are required
-# skip it, you might split them using slicing, i.e. puting 200 features 
-# for each calculation, and then merge the results
+# skip the following line, you might instead split your dataframe using slicing, 
+# i.e. putting 200 features for each calculation, and then merge the results
 new_df = df[[ "userID", "dayID", *list(map(feature_name, [0,1,2,3])) ]]
 
 # do the calculations
@@ -92,18 +92,15 @@ print(df, d1, sep="\n\n")
 
 """More thoughts:
 1. the list of random row indices that satisfy the requirements can be dished out before running apply(randx).
-   For example if all userID contain the same number of dayID, you can use a list of list that preset these row-indices.
+   For example if all userID have the same number of dayID, you can use a list of list that preset these row-indices.
    otherwise use a dictionary of lists. 
 
-   the number of features and dayIDs for each userID can all be retrieved before the actual calculations,
-   thus the above list should be doable before the actual calculations.
+   A reminder: if you use list of lists and L.pop() to dish out the row-indices, make sure the number 
+   of lists should be number of unique userID + 1, since GroupBy.apply() call it's function twice on the first
+   group
 
-   A reminder: if you use list of lists and pop(1) to dish out the row-indices, make sure the number 
-   of lists should be number of unique userID + 1, since DataFrame.apply() call it's function twice on the first
-   row/column
-
-2. Instead of returing a pd.Series() in the function randx(), you can also directly return a list. in such 
-   case, all retrieved features will be saved in one column. you can normalize them later.
+2. Instead of returning a pd.Series() in the function randx(), you can also directly return a list. in such 
+   case, all retrieved features will be saved in one column(see below). you can normalize them later.
 ```
 userID
 gh3    [50, 3.0, 59, 15]
