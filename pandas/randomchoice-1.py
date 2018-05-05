@@ -78,7 +78,7 @@ def feature_name(x):
 # if you have 1000+ columns(features) and all are required
 # skip the following line, you might instead split your dataframe using slicing, 
 # i.e. putting 200 features for each calculation, and then merge the results
-new_df = df[[ "userID", "dayID", *list(map(feature_name, [0,1,2,3])) ]]
+new_df = df[[ "userID", "dayID", *map(feature_name, [0,1,2,3]) ]]
 
 # do the calculations
 d1 = (new_df.groupby('userID')
@@ -110,4 +110,43 @@ xy1    [30, 7.0, 34, 43]
 3. if still slow, you can split 1000+ features into groups, i.e. process 200 columns(features) each run, slice the
    predefined row-indices accordingly, and then merge the results. 
 
+### Below a testing case: Debian-8 2G RAM, 1 CPU
+N_users = 100
+N_days = 7
+N_features = 1000
+
+# set up the dataset
+users = [ 'user{}'.format(i) for i in range(N_users) ]
+days  = [ 'day{}'.format(i) for i in range(N_days)   ]
+data =  []
+for u in users:
+    for d in days:
+        data.append([ u, d, *np.random.rand(N_features)])
+        
+def feature_name(x): 
+    return 'feature{}'.format(x)
+
+df = pd.DataFrame(data, columns=['userID', 'dayID', *map(feature_name, range(N_features))])
+     
+def randx_to_series(dfg):
+    x = [ *range(N_days), *np.random.randint(N_days, size=N_features-N_days) ]
+    np.random.shuffle(x)
+    return pd.Series([ dfg.iat[j,i] for i,j in enumerate(x,2) ])
+
+def randx_to_list(dfg):
+    x = [ *range(N_days), *np.random.randint(N_days, size=N_features-N_days) ]
+    np.random.shuffle(x)
+    return [ dfg.iat[j,i] for i,j in enumerate(x,2) ]
+
+In [133]: %timeit d1 = df.groupby('userID').apply(randx_to_series)
+7.82 s +/- 202 ms per loop (mean +/- std. dev. of 7 runs, 1 loop each)
+
+In [134]: %timeit d1 = df.groupby('userID').apply(randx_to_list)
+7.7 s +/- 47.2 ms per loop (mean +/- std. dev. of 7 runs, 1 loop each)
+
+In [135]: %timeit d1 = df.groupby('userID').agg(lambda x: np.random.choice(x,1))
+8.18 s +/- 31.1 ms per loop (mean +/- std. dev. of 7 runs, 1 loop each)
+
+# Also tested-(1) and maintaining an external List of row-indices does not help the performance.
+# 1000 columns is not a big problem for Pandas
 """
