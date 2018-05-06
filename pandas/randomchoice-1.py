@@ -149,4 +149,23 @@ In [135]: %timeit d1 = df.groupby('userID').agg(lambda x: np.random.choice(x,1))
 
 # Also tested-(1) and maintaining an external List of row-indices does not help the performance.
 # 1000 columns is not a big problem for Pandas
+
+more tests on randx_to_series:
+with 2000 features, thus total 2002 columns: 
+%%timeit
+%run ../../../stackoverflow/pandas/randomchoice-1-example.py
+...: 
+15.8 s ± 225 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+with 5000 features, thus total 5002 columns:
+%%timeit
+%run ../../../stackoverflow/pandas/randomchoice-1-example.py
+...: 
+39.3 s ± 628 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+with 10000 features, thus 10002 columns:
+%%timeit
+%run ../../../stackoverflow/pandas/randomchoice-1-example.py
+...: 
+1min 21s ± 1.73 s per loop (mean ± std. dev. of 7 runs, 1 loop each)
 """
