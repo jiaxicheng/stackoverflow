@@ -22,6 +22,8 @@ Method-2:
 
 In the following stackoverflow case, OP wanted to check visiting status (True/False) in the next `d` days' window. 
 
+Limitations:
+  * the methods listed are not working if the datetime field is ragged.
 
 XiCheng Jia Apr 30, 2018 @ New York
 Environment: Pandas 0.22.0, Python 3.6.4
