@@ -101,9 +101,9 @@ print(df2)
 # Visa       NaN  NaN   NaN  NaN      NaN  NaN   NaN  NaN
 
 # Calculate the common stats:
-df2.loc(1)[:,'total'] = df1.groupby(level=0, axis=1).sum().values
-df2.loc(1)[:,'avg']   = df1.groupby(level=0, axis=1).mean().values
-df2.loc(1)[:,'std']   = df1.groupby(level=0, axis=1).std().values
+df2.loc(1)[:,'total'] = df1.sum(1, level=0).values
+df2.loc(1)[:,'avg']   = df1.mean(1, level=0).values
+df2.loc(1)[:,'std']   = df1.std(1, level=0).values
 
 # join df2 with df1 and assign the result to df3 (can also overwrite df1): 
 # sort the result on columns level-0 only, keep the order of level-1 as-is
@@ -111,9 +111,7 @@ df3 = df1.join(df2).sort_index(axis=1, level=[0], ascending=[True])
 
 # calculate `pct` which needs both a calculated field and an original field
 # auth-rate = A / total
-df3.loc(1)[:,'pct'] = df3.groupby(level=0, axis=1)\
-                         .apply(lambda x: x.loc(1)[:,'A'].values/x.loc(1)[:,'total'].values) \
-                         .values
+df3.loc(1)[:,'pct'] = df3.loc(1)[:,'A'].div(df3.loc(1)[:,'total'].values).values
 
 # round the floating numbers to decimals
 df3.loc(1)[:,'pct'] = df3.loc(1)[:,'pct'].round(decimals=2)
