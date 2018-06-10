@@ -4,6 +4,10 @@ dataframe. for example to add new columns, to sort different levels.
 below is an example from stackoverflow:
 https://stackoverflow.com/questions/50750189/calculated-columns-in-multiindex/50753435#50753435
 
+Warn: Below code shuold be working with Pandas version 0.22.0 and above,
+old version might have issues with multiIndex and reindex(). Check the above 
+stackoverflow link which I supplied a solution for Python 2.75 + Pandas 0.17.0.
+
 The following knowledge is very useful for this task:
 (1) df.loc() method supports an axis argument which can simplify referencing row/column in 
     MultiIndex dataframes. for example, the following 4 notations are the same:
@@ -40,8 +44,19 @@ The following knowledge is very useful for this task:
     after running groupby(). Using values attribute to convert dataframe into numpy.ndarray 
     can overcome this issue.
 
-Note: Below code shuold be working with Pandas version 0.22.0 and above
-Pandas 0.17.0 has some issues when assigning values in multiIndex and will not work.
+Some notes:
+  (1) levels on index can merge with other lists using union() or '|', see below
+
+    df1.columns.levels[1] | ['total', 'avg', 'std', 'mead']
+    df1.columns.levels[1].union(['total', 'avg', 'std', 'mead'])
+
+    However, the result will be sorted neverthless, if you want reindex() to sort the columns
+    you will have to go through other methods:
+
+    + Python-3:  [ *df1.columns.levels[1], 'total', 'avg', 'std', 'mead' ]
+    + Python-2:  list(df1.columns.levels[1]) + ['total', 'avg', 'std', 'mead']
+
+    Note: `levels` are FrozenList and can NOT be modified (readonly)
 
 """
 import pandas as pd
