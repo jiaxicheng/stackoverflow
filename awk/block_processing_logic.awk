@@ -69,7 +69,7 @@ NR < threshold {
     prev = $0
     next
 }
-# print the last block if NR >= threshold 
+# print the last block if NR > threshold 
 !is_last_block_printed {
     print get_extra_text()
     is_last_block_printed = 1;
@@ -77,7 +77,4 @@ NR < threshold {
 
 # print lines when NR > threshold or after the first EMPTY line
 {   print "-" $0 }
-
-# print the last block if NR < threshold
-END { if(!is_last_block_printed) print get_extra_text() }
 
