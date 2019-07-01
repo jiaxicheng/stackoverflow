@@ -1,0 +1,136 @@
+###
+https://stackoverflow.com/questions/55960990/pyspark-get-first-column-occurrence-of-a-value-in-a-spark-dataframe/55969061#55969061
+
+from pyspark.sql import functions as F
+
+
+df = spark.createDataFrame(
+    [(1,1,0,0,2), (2,0,0,0,0), (3,4,2,2,4), (4,2,5,9,0), (5,0,4,0,0)]
+  , ['Id','Col1','Col2','Col3','Col4']
+)
+
+df
+#+---+----+----+----+----+
+#| Id|Col1|Col2|Col3|Col4|
+#+---+----+----+----+----+
+#|  1|   1|   0|   0|   2|
+#|  2|   0|   0|   0|   0|
+#|  3|   4|   2|   2|   4|
+#|  4|   2|   5|   9|   0|
+#|  5|   0|   4|   0|   0|
+#+---+----+----+----+----+
+
+cols = df.columns[1:]
+
+df.withColumn('arr_0', F.array([ F.when(F.col(cols[i])==0, i+1) for i in range(len(cols))])) \
+  .select('*', F.array_min('arr_0').alias('first_0'), F.array_max('arr_0').alias('last_0')) \
+  .fillna(0, subset=['first_0', 'last_0']) \
+  .show()
+#+---+----+----+----+----+------------+-------+------+
+#| Id|Col1|Col2|Col3|Col4|       arr_0|first_0|last_0|
+#+---+----+----+----+----+------------+-------+------+
+#|  1|   1|   0|   0|   2|   [, 2, 3,]|      2|     3|
+#|  2|   0|   0|   0|   0|[1, 2, 3, 4]|      1|     4|
+#|  3|   4|   2|   2|   4|       [,,,]|      0|     0|
+#|  4|   2|   5|   9|   0|     [,,, 4]|      4|     4|
+#|  5|   0|   4|   0|   0|  [1,, 3, 4]|      1|     4|
+#+---+----+----+----+----+------------+-------+------+
+
+
+df.withColumn('arr_0', F.array([ F.when(F.col(cols[i])==0, i+1) for i in range(len(cols))])) \
+  .withColumn('first_0', F.least(*[F.col('arr_0')[i] for i in range(len(cols))])) \
+  .withColumn('last_0', F.greatest(*[F.col('arr_0')[i] for i in range(len(cols))])) \
+  .fillna(0, subset=['first_0', 'last_0']) \
+  .show()
+
+
+#########################################
+#           
+https://stackoverflow.com/questions/55967443/pyspark-shift-column-values-based-on-other-column-value
+#
+
+from pyspark.sql import functions as F
+
+df = spark.createDataFrame(
+    [(1,1,2,3,4,1),(2,5,6,7,8,3),(3,9,10,11,12,2),(4,13,14,15,16,0),(5,17,18,19,20,5)]
+  , ['Id','Col1','Col2','Col3','Col4','shift']
+)
+
+df.printSchema()
+#root
+# |-- Id: long (nullable = true)
+# |-- Col1: long (nullable = true)
+# |-- Col2: long (nullable = true)
+# |-- Col3: long (nullable = true)
+# |-- Col4: long (nullable = true)
+# |-- shift: long (nullable = true)
+
+# colume names to shift/rotate
+cols = df.columns[1:-1]
+
+#Method-1: Using UDF:
+
+@F.udf("array<long>")
+def my_shift(arr, n):
+    if n == 0: return arr
+    arr_len = len(arr)
+    return [ arr[(i+n)%arr_len] for i in range(arr_len) ]
+
+
+# group the cols into an array and then run the udf-my_shift() to form the new_arr column
+df_new = (df.withColumn('arr', F.array([ F.col(c) for c in cols ]))  
+            .withColumn('new_arr', my_shift('arr', 'shift'))  
+            .select('ID', 'arr', 'new_arr', *[ F.col('new_arr')[i].alias(cols[i]) for i in range(len(cols)) ])  
+         )
+
+df_new.show()                                                                                                      
+#+---+----------------+----------------+----+----+----+----+
+#| ID|             arr|         new_arr|Col1|Col2|Col3|Col4|
+#+---+----------------+----------------+----+----+----+----+
+#|  1|    [1, 2, 3, 4]|    [2, 3, 4, 1]|   2|   3|   4|   1|
+#|  2|    [5, 6, 7, 8]|    [8, 5, 6, 7]|   8|   5|   6|   7|
+#|  3| [9, 10, 11, 12]| [11, 12, 9, 10]|  11|  12|   9|  10|
+#|  4|[13, 14, 15, 16]|[13, 14, 15, 16]|  13|  14|  15|  16|
+#|  5|[17, 18, 19, 20]|[18, 19, 20, 17]|  18|  19|  20|  17|
+#+---+----------------+----------------+----+----+----+----+
+
+#+---+----+----+----+----+
+#| ID|Col1|Col2|Col3|Col4|
+#+---+----+----+----+----+
+#|  1|   2|   3|   4|   1|
+#|  2|   8|   5|   6|   7|
+#|  3|  11|  12|   9|  10|
+#|  4|  13|  14|  15|  16|
+#|  5|  18|  19|  20|  17|
+#+---+----+----+----+----+
+
+
+Method-2: RDD map() function
+
+def do_stuff(row):
+    arr_len = len(row.arr)
+    new_arr = [ row.arr[(i+row.shift)%arr_len] for i in range(arr_len) ]
+    return Row(Id=row.Id, **dict(zip(cols, new_arr)))
+#    return Row(new_arr=new_arr, **{c:row[c] for c in ['Id', 'shift', 'arr']})
+#    return Row(new_arr=new_arr, **{c:row[c] for c in cols})
+#    return Row(new_arr, *row)
+#    return Row(Id=row.Id, new_arr=new_arr)
+
+#new_df = df.withColumn('arr', F.array([ F.col(c) for c in cols ])) \
+#           .rdd.map(do_stuff).toDF() \ 
+#           .select('Id', *[ F.col('new_arr')[i].alias(cols[i]) for i in range(len(cols)) ])
+
+df.withColumn('arr', F.array([ F.col(c) for c in cols ])).rdd.map(do_stuff).toDF().show()
+
+new_df.show()
+#+---+----+----+----+----+
+#| Id|Col1|Col2|Col3|Col4|
+#+---+----+----+----+----+
+#|  1|   2|   3|   4|   1|
+#|  2|   8|   5|   6|   7|
+#|  3|  11|  12|   9|  10|
+#|  4|  13|  14|  15|  16|
+#|  5|  18|  19|  20|  17|
+#+---+----+----+----+----+
+
+
