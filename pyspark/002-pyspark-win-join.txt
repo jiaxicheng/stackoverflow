@@ -1,0 +1,55 @@
+
+from pyspark.sql import Window, functions as F
+
+FlightDate=[20,40,51,50,60,15,27,37,36,50]
+IssuingDate=[10,15,44,45,55,10,2,30,32,24]
+Revenue = [100,50,40,70,60,40,30,100,200,100]
+Customer = ['a','a','a','a','a','b','b','b','b','b']
+df = spark.createDataFrame(pd.DataFrame([Customer,FlightDate,IssuingDate, Revenue]).T, schema=["Customer",'FlightDate', 'IssuingDate','Revenue'])
+
+# add an `id` for join in the later transformations
+df = df.select(F.monotonically_increasing_id().alias('id'), '*')
+
+# create a win spec
+win = Window.partitionBy('Customer').orderBy('IssuingDate').rangeBetween(0,10)
+
+# create a new dataframe with IssuingDate = FlightDate and Revenue = None and union with the original dataframe
+df1 = df.union(df.select('id', 'Customer', 'FlightDate', 'FlightDate', F.lit(None).alias('Revenue')))
+
+# calculate the sum based on win spec and keep only those `Revenue is NULL`
+df2 = df1.withColumn('Result', F.sum('Revenue').over(win)) \
+         .select('id', 'Result') \
+         .where('Revenue is NULL') \
+         .fillna(0)
+#df2.show()
+#+---+------+                                                                    
+#| id|Result|
+#+---+------+
+#|  5|   100|
+#|  6|   300|
+#|  8|     0|
+#|  7|     0|
+#|  9|     0|
+#|  0|     0|
+#|  1|   110|
+#|  3|    60|
+#|  2|    60|
+#|  4|     0|
+#+---+------+
+
+# join the df2 back to the original one and then drop `id`
+df.join(df2, on='id').drop('id').sort('Customer','FlightDate').show()
+#+--------+----------+-----------+-------+------+                                
+#|Customer|FlightDate|IssuingDate|Revenue|Result|
+#+--------+----------+-----------+-------+------+
+#|       a|        20|         10|    100|     0|
+#|       a|        40|         15|     50|   110|
+#|       a|        50|         45|     70|    60|
+#|       a|        51|         44|     40|    60|
+#|       a|        60|         55|     60|     0|
+#|       b|        15|         10|     40|   100|
+#|       b|        27|          2|     30|   300|
+#|       b|        36|         32|    200|     0|
+#|       b|        37|         30|    100|     0|
+#|       b|        50|         24|    100|     0|
+#+--------+----------+-----------+-------+------+
