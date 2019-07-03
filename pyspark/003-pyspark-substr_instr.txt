@@ -3,6 +3,7 @@ REF: https://stackoverflow.com/questions/56856325/reading-json-with-leading-time
 """
 
 """Sample data"""
+>>> from pyspark.sql import functions as F
 >>> df = spark.createDataFrame([
         ('''2019-06-28T00:00:00.000Z { "a": 123, "b": "456", "c": 789 }''',)
     ], ['data']
