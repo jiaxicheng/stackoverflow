@@ -1,0 +1,34 @@
+"""Split data based on the first space into timestamp and json_data
+REF: https://stackoverflow.com/questions/56856325/reading-json-with-leading-timestamp
+"""
+
+"""Sample data"""
+>>> df = spark.createDataFrame([
+        ('''2019-06-28T00:00:00.000Z { "a": 123, "b": "456", "c": 789 }''',)
+    ], ['data']
+)
+
+>>> df.show(1,0)
++-----------------------------------------------------------+
+|data                                                       |
++-----------------------------------------------------------+
+|2019-06-28T00:00:00.000Z { "a": 123, "b": "456", "c": 789 }|
++-----------------------------------------------------------+
+
+"""Use F.instr() to locate the position of the first space and then use
+F.substr() to split the data into two fields
+F.expr() is used so that Column object can be used in functions
+"""
+
+>>> df.select(
+    F.expr('substr(data, 0, instr(data," ")-1)').alias('dt')
+  , F.expr('substr(data, instr(data," ")+1)').alias('json_data')
+).show(1,0)
+
++------------------------+----------------------------------+
+|dt                      |json_data                         |
++------------------------+----------------------------------+
+|2019-06-28T00:00:00.000Z|{ "a": 123, "b": "456", "c": 789 }|
++------------------------+----------------------------------+
+
+
