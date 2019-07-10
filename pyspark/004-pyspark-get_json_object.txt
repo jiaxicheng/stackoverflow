@@ -1,0 +1,60 @@
+"""
+An example to convert a string field containing JSON data into pyspark struct field
+https://stackoverflow.com/questions/55976011/convert-string-type-column-to-struct-column-in-pyspark
+
+Note: limitation for the implementation of JSONPath with pyspark.
+Supported:
+  * '$' as Root object
+  * '.' as Child operator
+  * '[]' as Subscript operator for array
+  * '*' as wildcard for []
+
+Not supported:
+  * '@' current object
+  * '()' Script expression
+  * '?()' Filter (script) expression
+  * '[,]' Union operator
+  * '[start:end.step]' array slice
+
+Thus this function is limited and not able to handle complex situations, for example, filter from an array of 
+dicts, example question: https://stackoverflow.com/questions/56898824/split-pyspark-dataframe-column-into-multiple-columns
+"""
+
+from pyspark.sql import functions as F
+
+df = spark.createDataFrame([
+('1234', "[{u'createdClub': u'1234', u'cardStatus': u'ACTIVE', u'issuedReason': u'new member', u'cardType': u'MEMBERSHIPACCOUNT', u'cardNumber':u'109214092'}]"),
+('3712', "[{u'createdClub': u'3712', u'cardStatus': u'EXPIRE', u'issuedReason': u'old member', u'cardType': u'MEMBERSHIPACCOUNT', u'cardNumber':u'109214092'}]")
+], ['issuingClub', 'memberCards'])
+
+df.printSchema()
+root
+ |-- issuingClub: string (nullable = true)
+ |-- memberCards: string (nullable = true)
+
+json_fields = ['createdClub', 'cardStatus', 'issuedReason', 'cardType', 'cardNumber' ]
+
+df_new = df.withColumn('memberCards', F.regexp_replace('memberCards', "u'|'", '"')) \ 
+           .withColumn('memberCards', F.regexp_replace('memberCards', "^\[|\]$", '')) \ 
+           .select('issuingClub', F.struct(
+                *[ F.get_json_object('memberCards', '$.{}'.format(f)) for f in json_fields ]
+            ).alias('memberCards'))
+
+df_new.show(2,0)
++-----------+--------------------------------------------------------+
+|issuingClub|memberCards                                             |
++-----------+--------------------------------------------------------+
+|1234       |[1234, ACTIVE, new member, MEMBERSHIPACCOUNT, 109214092]|
+|3712       |[3712, EXPIRE, old member, MEMBERSHIPACCOUNT, 109214092]|
++-----------+--------------------------------------------------------+
+
+df_new.printSchema()
+root
+ |-- issuingClub: string (nullable = true)
+ |-- memberCards: struct (nullable = false)
+ |    |-- col1: string (nullable = true)
+ |    |-- col2: string (nullable = true)
+ |    |-- col3: string (nullable = true)
+ |    |-- col4: string (nullable = true)
+ |    |-- col5: string (nullable = true)
+
