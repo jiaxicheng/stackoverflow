@@ -1,0 +1,63 @@
+(2)
+https://stackoverflow.com/questions/56202636/split-parse-values-of-a-panda-dataframe-column-into-nested-json
+
+
+str="""AbcDefGhijKLmNOP111213212223313233hrydYLKSKSHYH
+aBCdEFgHIJklMnop414243515253616263HRYDylkskshyh
+ABcdeFGHiJKlmnOp717273818283919293hRyDYlKsKsHyH"""
+
+df= pd.read_fwf(pd.io.common.StringIO(str), widths=[6,10,18,15], header=None)
+
+ptn = ''.join([ r'(?P<uc{}>\d\d)'.format(i+1) for i in range(3) ])
+print(ptn)
+#(?P<uc1>\d\d)(?P<uc2>\d\d)(?P<uc3>\d\d)
+
+#df['U_new'] = df.U.str.extractall('(?P<uc1>\d\d)(?P<uc2>\d\d)(?P<uc3>\d\d)') \
+df['U_new'] = df.U.str.extractall(ptn) \
+                .groupby(level=0) \
+                .apply(lambda x:x.to_json(orient='records'))
+
+
+df['U_new'] = df.U.str.extractall(ptn) \
+                .groupby(level=0) \
+                .apply(lambda x:x.to_dict('r'))
+
+
+
+
+(3)
+https://stackoverflow.com/questions/56239674/using-regex-to-selectively-pull-data-into-pandas-dataframe?noredirect=1#comment99108412_56239674
+
+    str="""
+    Name : "Bob" Occupation : "Builder" Age : "42" Name : "Jim" Occupation : "" Age : "25" Name : "Steve" Occupation : "Clerk" Age : "110" 
+    Name : "Bob" Occupation : "Builder" Age : "42" Name : "Jim" Occupation : "" Age : "25"
+    """
+    
+    df = pd.read_csv(pd.io.common.StringIO(str), squeeze=True, header=None).to_frame('text')
+    
+    
+    fields = ['Name', 'Occupation', 'Age']
+    ptn = r'\s+'.join([r'{0}\s*:\s*"(?P<{0}>[^"]+)"'.format(f) for f in fields])
+    print(ptn)
+    #Name\s*:\s*"(?P<Name>[^"]+)"\s+Occupation\s*:\s*"(?P<Occupation>[^"]+)"\s+Age\s*:\s*"(?P<Age>[^"]+)"
+
+The sub-pattern `Name\s*:\s*"(?P<Name>[^"]+)"` is basically doing the same as `Name : "([^"]+)"`, but with optionally 0 to more whitespaces surrounding the colon":" and a named capturing group. the plus #+# in `"([^"]+)"` is to make sure the value enclosed by double-quotes is not EMPTY, thus will skip Jim's profile since his Occupation is EMPTY.
+
+
+    df['text'].str.extractall(ptn)                                                                                     
+              Name Occupation  Age
+      match                       
+    0 0        Bob    Builder   42
+      1      Steve      Clerk  110
+    1 0        Bob    Builder   42
+
+drop the level-1 index, you will get a dataframe with the original index. you can join this back to the original dataframe if there are other columns used in your tasks.
+
+    df['text'].str.extractall(ptn).reset_index(level=1, drop=True)
+    ###
+        Name Occupation  Age
+    0    Bob    Builder   42
+    0  Steve      Clerk  110
+    1    Bob    Builder   42
+    
+
