@@ -13,7 +13,8 @@ Setup
 
 Transform the arrays so that they contain proper elements:
 
-for an empty array, keep the array as-is, otherwise do the following:
+if array has more than one elements, do the following, otherwise keep as-is:
+(Actually, change only happens when there are 2 or 3 elements in an array, all others will be kept as-is)
 1. use array_join to convert array into a string with a selected delimiter, i.e. ','
 2. calculate # of elements in array and get the number of repeats required `6/size(c)` 
 3. repeat each {delimiter} with the number calculated above using regexp_replace()
@@ -32,7 +33,7 @@ for an empty array, keep the array as-is, otherwise do the following:
         # convert column 'a' into an array, so that we can handle all columns in the same way
         df1 = df.withColumn('a', F.array('a')) \
                 .select(*[ 
-                    F.when(F.size(c) > 0, F.expr(stmt.format(c,d))).otherwise(F.col(c)).alias(c)
+                    F.when(F.size(c) > 1, F.expr(stmt.format(c,d))).otherwise(F.col(c)).alias(c)
                     for c in cols
                  ])
 
@@ -69,7 +70,7 @@ All in one method chain without intermediate transformations:
 
 df_new = df.withColumn('a', F.array('a')) \
            .select(*[
-                F.when(F.size(c) > 0, F.expr(stmt.format(c,d))).otherwise(F.col(c)).alias(c)
+                F.when((F.size(c) == 2) | (F.size(c) == 3), F.expr(stmt.format(c,d))).otherwise(F.col(c)).alias(c)
                 for c in cols
             ]) \
            .withColumn('vals', F.explode(F.arrays_zip(*cols))) \
