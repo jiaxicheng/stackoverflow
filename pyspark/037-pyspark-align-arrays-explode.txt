@@ -1,0 +1,80 @@
+https://stackoverflow.com/questions/56931256/how-to-explode-multiple-columns-different-types-and-different-lengths
+
+Setup
+
+    df = spark.createDataFrame([ Row(a=1, b=[1, 2, 3, 4, 5, 6], c=['11', '22', '33'], d=['foo'], e=[111,222]) ])
+        
+    >>> df.show()
+    +---+------------------+------------+-----+----------+
+    |  a|                 b|           c|    d|         e|
+    +---+------------------+------------+-----+----------+
+    |  1|[1, 2, 3, 4, 5, 6]|[11, 22, 33]|[foo]|[111, 222]|
+    +---+------------------+------------+-----+----------+
+
+Transform the arrays so that they contain proper elements:
+
+for an empty array, keep the array as-is, otherwise do the following:
+1. use array_join to convert array into a string with a selected delimiter, i.e. ','
+2. calculate # of elements in array and get the number of repeats required `6/size(c)` 
+3. repeat each {delimiter} with the number calculated above using regexp_replace()
+4. split the resulting string in (3) with {delimiter} to create the new arrays
+
+        # columns required to explode
+        cols = df.columns
+ 
+        # set up the delimiter
+        d = ','
+
+        # format the statement used to handle the above step 1-4
+        # where {0} is column-name and {1} is delimiter
+        stmt = "split(regexp_replace(array_join({0},'{1}'),'{1}',repeat('{1}',6/size({0}))),'{1}')"
+
+        # convert column 'a' into an array, so that we can handle all columns in the same way
+        df1 = df.withColumn('a', F.array('a')) \
+                .select(*[ 
+                    F.when(F.size(c) > 0, F.expr(stmt.format(c,d))).otherwise(F.col(c)).alias(c)
+                    for c in cols
+                 ])
+
+        >>> df1.show()
+        +---+------------------+----------------+-----+--------------+
+        |  a|                 b|               c|    d|             e|
+        +---+------------------+----------------+-----+--------------+
+        |[1]|[1, 2, 3, 4, 5, 6]|[11, , 22, , 33]|[foo]|[111, , , 222]|
+        +---+------------------+----------------+-----+--------------+
+     
+
+arrays_zip and explode
+        
+Now you can use what you've done in your original post:
+
+    df_new = df1.withColumn('vals', F.explode(F.arrays_zip(*cols))) \
+                .select('vals.*') \
+                .fillna('', subset=cols)
+    
+    >>> df_new.show()
+    +---+---+---+---+---+
+    |  a|  b|  c|  d|  e|
+    +---+---+---+---+---+
+    |  1|  1| 11|foo|111|
+    |   |  2|   |   |   |
+    |   |  3| 22|   |   |
+    |   |  4|   |   |222|
+    |   |  5| 33|   |   |
+    |   |  6|   |   |   |
+    +---+---+---+---+---+
+    
+
+All in one method chain without intermediate transformations:
+
+df_new = df.withColumn('a', F.array('a')) \
+           .select(*[
+                F.when(F.size(c) > 0, F.expr(stmt.format(c,d))).otherwise(F.col(c)).alias(c)
+                for c in cols
+            ]) \
+           .withColumn('vals', F.explode(F.arrays_zip(*cols))) \
+           .select('vals.*') \
+           .fillna('', subset=cols)
+
+Note: in case Rows with max array-size < 6 while you want to explode into 6 Rows for each record, add a dummy column
+`withColumn('t', F.array_repeat(F.lit(1),6))` and add it into the cols for arrays_zip()
