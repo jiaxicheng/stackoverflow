@@ -1,0 +1,58 @@
+```A good example of using LEFT_SEMI (same to `EXISTS`) and LEFT_ANTI (same to `NOT EXISTS`) JOIN
+```
+https://stackoverflow.com/questions/56992916/checking-if-any-date-in-a-python-list-of-dates-is-between-two-date-columns/56994936#56994936
+
+from pyspark.sql import functions as F
+
+>>> df.show()
++-------------------+-------------------+
+|         START_DATE|           END_DATE|
++-------------------+-------------------+
+|2019-01-01 00:00:00|2019-01-12 00:00:00|
+|2019-01-03 00:00:00|2019-01-05 00:00:00|
+|2019-04-03 00:00:00|2019-04-09 00:00:00|
++-------------------+-------------------+
+
+>>> df.printSchema()
+root
+ |-- START_DATE: timestamp (nullable = true)
+ |-- END_DATE: timestamp (nullable = true)
+
+# Convert List of Dates into a spark dataframe
+dates_list = ['2019-01-06', '2019-04-08']
+df_dates = spark.createDataFrame([(d,) for d in dates_list], ['date'])
+df_dates = df_dates.withColumn('date', F.to_timestamp('date'))
+
+>>> df_dates.show()
++-------------------+
+|               date|
++-------------------+
+|2019-01-06 00:00:00|
+|2019-04-08 00:00:00|
++-------------------+
+
+
+Use left_semi Join to get all matched Rows and left_anti JOIN to get all non-matched Rows, flag the Rows and then Union the results
+
+df_new = df.join(df_dates,
+            (df_dates.date <= df.END_DATE) & (df_dates.date >= df.START_DATE)
+          , how='left_semi'
+    ).withColumn('Flag', F.lit(True)
+).union(
+         df.join(df_dates,
+            (df_dates.date <= df.END_DATE) & (df_dates.date >= df.START_DATE)
+          , how='left_anti'
+    ).withColumn('Flag', F.lit(False))
+)
+
+>>> df_new.show()
++-------------------+-------------------+-----+
+|         START_DATE|           END_DATE| Flag|
++-------------------+-------------------+-----+
+|2019-01-01 00:00:00|2019-01-12 00:00:00| true|
+|2019-04-03 00:00:00|2019-04-09 00:00:00| true|
+|2019-01-03 00:00:00|2019-01-05 00:00:00|false|
++-------------------+-------------------+-----+
+
+
+    
