@@ -34,16 +34,17 @@ df_dates = df_dates.withColumn('date', F.to_timestamp('date'))
 
 Use left_semi Join to get all matched Rows and left_anti JOIN to get all non-matched Rows, flag the Rows and then Union the results
 
-df_new = df.join(df_dates,
-            (df_dates.date <= df.END_DATE) & (df_dates.date >= df.START_DATE)
-          , how='left_semi'
-    ).withColumn('Flag', F.lit(True)
-).union(
-         df.join(df_dates,
-            (df_dates.date <= df.END_DATE) & (df_dates.date >= df.START_DATE)
-          , how='left_anti'
-    ).withColumn('Flag', F.lit(False))
-)
+df_exist = df.join(F.broadcast(df_dates)
+                , (df_dates.date <= df.END_DATE) & (df_dates.date >= df.START_DATE)
+                , how = 'left_semi'
+            ).withColumn('Flag', F.lit(True))
+
+df_notexist = df.join(F.broadcast(df_dates)
+                   , (df_dates.date <= df.END_DATE) & (df_dates.date >= df.START_DATE)
+                   , how='left_anti'
+               ).withColumn('Flag', F.lit(False))
+
+df_new = df_exist.union(df_notexist)
 
 >>> df_new.show()
 +-------------------+-------------------+-----+
@@ -54,5 +55,3 @@ df_new = df.join(df_dates,
 |2019-01-03 00:00:00|2019-01-05 00:00:00|false|
 +-------------------+-------------------+-----+
 
-
-    
