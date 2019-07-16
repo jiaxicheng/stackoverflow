@@ -1,0 +1,135 @@
+https://stackoverflow.com/questions/56931256/how-to-explode-multiple-columns-different-types-and-different-lengths
+
+Setup
+-----
+
+    from pyspark.sql import functions as F, Row
+
+    df = spark.createDataFrame([
+          Row(a=1, b=[1, 2, 3, 4, 5, 6], c=['11', '22', '33'], d=['foo'], e=[1,2,3])
+        , Row(a=2, b=[], c=[], d=[], e=[111,222])
+    ])
+        
+    >>> df.show()
+    +---+------------------+------------+-----+----------+
+    |  a|                 b|           c|    d|         e|
+    +---+------------------+------------+-----+----------+
+    |  1|[1, 2, 3, 4, 5, 6]|[11, 22, 33]|[foo]| [1, 2, 3]|
+    |  2|                []|          []|   []|[111, 222]|
+    +---+------------------+------------+-----+----------+
+
+    # columns required to explode
+    cols = df.columns
+ 
+Method-2: Using SQL higher-order function: [transform][1]
+-----------------------------------------------
+Use the Spark SQL higher-order function: transform(), do the following:
+
+1. set up a reference column **`t`** with value = [1,1,1,1,1,1] which is a constant array with 6 elements. The transform function will be based on this column which we can iterate the array index from 0 to 5. (we only need the array-indexes from this column) 
+
+    **Note:** 
+
+    + If there is a column which guarantee to contain an array of 6 elements for each Row, then you can use that existing column.
+    + values in column `a` is converted into array, so the same method can be applied to all cols.
+2. create the following Spark SQL code where **`{0}`** will be replaced by the column_name:
+
+        stmt = '''
+            CASE
+              WHEN size({0}) in (2,3) THEN
+                transform(t, (x,i) -> IF((i*size({0}))%6 == 0, {0}[int(i*size({0})/6)], NULL)) 
+              ELSE {0}
+            END AS {0}
+        '''
+
+    **Note:** array transformation only defined when array contains 2 or 3 elements. arrays with other size will be kept as-is. 
+
+3. Run the above SQL with **selectExpr()** for all computed columns
+
+        df1 = df.withColumn('a', F.array('a')) \
+                .withColumn('t', F.array_repeat(F.lit(1),6)) \
+                .selectExpr(*[ stmt.format(c) for c in cols ])
+
+        >>> df1.show()
+        +---+------------------+---------------+-----+--------------+
+        |  a|                 b|              c|    d|             e|
+        +---+------------------+---------------+-----+--------------+
+        |[1]|[1, 2, 3, 4, 5, 6]|[11,, 22,, 33,]|[foo]|  [1,, 2,, 3,]|
+        |[2]|                []|             []|   []|[111,,, 222,,]|
+        +---+------------------+---------------+-----+--------------+
+
+
+4. run **arrays_zip** and **explode**:
+
+        df_new = df1.withColumn('vals', F.explode(F.arrays_zip(*cols))) \
+                    .select('vals.*') \
+                    .fillna('', subset=cols)
+
+        >>> df_new.show()
+        +----+----+---+---+----+
+        |   a|   b|  c|  d|   e|
+        +----+----+---+---+----+
+        |   1|   1| 11|foo|   1|
+        |null|   2|   |   |null|
+        |null|   3| 22|   |   2|
+        |null|   4|   |   |null|
+        |null|   5| 33|   |   3|
+        |null|   6|   |   |null|
+        |   2|null|   |   | 111|
+        |null|null|   |   |null|
+        |null|null|   |   |null|
+        |null|null|   |   | 222|
+        |null|null|   |   |null|
+        |null|null|   |   |null|
+        +----+----+---+---+----+
+
+    **Note**: `fillna('', subset=cols)` only changed columns containing Strings
+
+In one method chain:
+--------------------
+
+    df_new = df.withColumn('a', F.array('a')) \
+               .withColumn('t', F.array_repeat(F.lit(1),6)) \
+               .selectExpr(*[ stmt.format(c) for c in cols ]) \
+               .withColumn('vals', F.explode(F.arrays_zip(*cols))) \
+               .select('vals.*') \
+               .fillna('', subset=cols)
+
+
+The function transform() takes two arguments: an array and an anonymous function
+which itself can take two form: one argument (array element) or two arguments (array element
+and index)
+
+    transform(arr, x -> expression(x))
+    transform(arr, (x, i) -> expression(x,i))
+
+The tricky part is that in expression, you can use the values from other fields in the same SQL.
+In our problem, we need to transform all arrays into 6-elements array and evenly redistribute 
+the elements if needed. 
+
+The reference array `t` is to make sure the transform() function call return exactly 6 elemets.
+you can set its value to [0,1,2,3,4,5] then we can use 'x' in calculation or just constant '1'
+so we can use the index 'i' in the 2nd form. 
+
+   transform(t, (x,i) -> IF((i*size({0}))%6 == 0, {0}[int(i*size({0})/6)], NULL))
+
+as mentioned in the post, {0} will be replaced with column name, Here we use column-`c` which contains 3 elements 
+as an example:
+
+* IF(condition, true_value, false_value): is a standard SQL function
+* `(i*size({0}))%6 == 0`: in the transform function, i will be iterate from 0 to 5. size(c) = 3
+  If condition is true, it will return c[int(i*size({0})/6)], otherwise, return NULL
+  thus from 0 to 5, we will have: 
+  + ((0*3)%6)==0) true   -->  c[int(0*3/6)] = c[0]
+  + ((1*3)%6)==0) false  -->  NULL
+  + ((2*3)%6)==0) true   -->  c[int(2*3/6)] = c[1]
+  + ((3*3)%6)==0) false  -->  NULL
+  + ((4*3)%6)==0) true   -->  c[int(4*3/6)] = c[2]
+  + ((5*3)%6)==0) false  -->  NULL
+
+
+Here we create a temporary array `t` with exact 6 elements 
+
+
+
+[1]: https://docs.databricks.com/_static/notebooks/apache-spark-2.4-functions.html
+
