@@ -1,0 +1,81 @@
+
+https://stackoverflow.com/questions/57070594/make-and-populate-a-pyspark-dataframe-with-columns-as-period-range
+
+Set up the data from the original post.
+
+    import pandas as pd
+    from pyspark.sql import functions as F
+
+    #... skip the code to initialize spark and df
+
+    >>> df.show()
+    +---+---+----------+----------+
+    |id_|  p|        d1|        d2|
+    +---+---+----------+----------+
+    |  1|  A|2018-09-26|2018-10-26|
+    |  2|  B|2018-06-21|2018-07-19|
+    |  2|  B|2018-08-13|2018-10-07|
+    |  2|  B|2018-12-31|2019-02-27|
+    |  2|  B|2019-05-28|2019-06-25|
+    |  3|  C|2018-06-15|2018-07-13|
+    |  3|  C|2018-08-15|2018-10-09|
+    |  3|  C|2018-12-03|2019-03-12|
+    |  3|  C|2019-05-10|2019-06-07|
+    |  4|  A|2019-01-30|2019-03-01|
+    |  4|  A|2019-05-30|2019-07-25|
+    |  5|  C|2018-09-19|2018-10-17|
+    +---+---+----------+----------+
+
+    
+    >>> df.printSchema()
+    root
+     |-- id_: string (nullable = true)
+     |-- p: string (nullable = true)
+     |-- d1: string (nullable = true)
+     |-- d2: string (nullable = true)
+
+
+Get min(d1) for `start_date` and max(d2) for `end_date`: 
+
+    d = df.select(F.min('d1').alias('start_date'), F.max('d2').alias('end_date')).first()
+
+    >>> d
+    Row(start_date=u'2018-06-15', end_date=u'2019-07-25')
+
+Get a list of dates and convert them to String
+
+    cols = [ c.strftime('%Y-%m-%d') for c in pd.period_range(d.start_date, d.end_date, freq='D') ]
+    >>> cols
+    [u'2018-06-15',
+     u'2018-06-16',
+     .....
+     u'2019-07-23',
+     u'2019-07-24',
+     u'2019-07-25']
+
+Use list comprehension to iterate all dates in `cols`, use F.when(condition) to set up the column values
+
+    result = df.select(*[ F.when((df.d1 <= c)&(df.d2 >= c),1).otherwise(0).alias(c) for c in cols ])
+
+    >>> result.select(d.start_date, '2019-01-01', d.end_date).show()
+    +----------+----------+----------+
+    |2018-06-15|2019-01-01|2019-07-25|
+    +----------+----------+----------+
+    |         0|         0|         0|
+    |         0|         0|         0|
+    |         0|         0|         0|
+    |         0|         1|         0|
+    |         0|         0|         0|
+    |         1|         0|         0|
+    |         0|         0|         0|
+    |         0|         1|         0|
+    |         0|         0|         0|
+    |         0|         0|         0|
+    |         0|         0|         1|
+    |         0|         0|         0|
+    +----------+----------+----------+
+
+**Note:** You probably want to convert d1, d2, cols to timestamp fields for better performance, the method should be
+the same, just do some more date manipulations.
+
+
