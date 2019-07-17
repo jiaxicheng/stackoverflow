@@ -46,4 +46,24 @@ Where we first split the field History into an array column called `data` and th
 to retrieve only array elements which satisfy the condition: IN ("USA", "IND", "DEN"), after that, we count 
 the resulting array with size() function.
 
+*** Method-2 ***
+Using array_contains() which is available since Spark version 1.5:
 
+lst = ["USA", "IND", "DEN"]
+
+df_new = df.withColumn('data', F.split('History', '\|')) \
+           .withColumn('Count', sum([F.when(F.array_contains('data',e),1).otherwise(0) for e in lst]))
+
+>>> df_new.show()
++---+--------------------+--------------------+-----+
+| ID|             History|                data|Count|
++---+--------------------+--------------------+-----+
+|  1|USA|UK|IND|DEN|MA...|[USA, UK, IND, DE...|    3|
+|  2|      USA|UK|PAK|NOR| [USA, UK, PAK, NOR]|    1|
+|  3|             NOR|NZE|          [NOR, NZE]|    0|
+|  4|         IND|PAK|NOR|     [IND, PAK, NOR]|    1|
++---+--------------------+--------------------+-----+
+
+Note: 
+ * array_contain function only counts unique country code
+ * the method with filter() function will count duplicate entries.
