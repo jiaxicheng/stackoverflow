@@ -20,6 +20,9 @@ Setup
 
     # columns required to explode
     cols = df.columns
+
+    # number of elements to set
+    N = 6
  
 Method-2: Using SQL higher-order function: [transform][1]
 -----------------------------------------------
@@ -29,27 +32,28 @@ Use the Spark SQL higher-order function: transform(), do the following:
 
         stmt = '''
             CASE
-              WHEN size(`{0}`) in (2,3) THEN
-                transform(sequence(0,5), x -> IF((x*size(`{0}`))%6 == 0, `{0}`[int(x*size(`{0}`)/6)], NULL)) 
+              WHEN '{0}' in ('d') THEN
+                transform(sequence(0,{1}-1), x -> IF(x == 1, `{0}`[0], NULL))
+              WHEN size(`{0}`) <= {1}/2 THEN
+                transform(sequence(0,{1}-1), x -> IF(((x+1)*size(`{0}`))%{1} == 0, `{0}`[int((x-1)*size(`{0}`)/{1})], NULL)) 
               ELSE `{0}`
             END AS `{0}`
         '''
 
-    **Note:** array transformation only defined when array contains 2 or 3 elements. arrays with other size will be kept as-is. 
+    **Note:** array transformation only defined when array contains <= N/2 elements (in this example, size <= 3). arrays with other size will be kept as-is. 
 
 3. Run the above SQL with **selectExpr()** for all computed columns
 
         df1 = df.withColumn('a', F.array('a')) \
-                .selectExpr(*[ stmt.format(c) for c in cols ])
+                .selectExpr(*[ stmt.format(c,N) for c in cols ])
 
         >>> df1.show()
-        +---+------------------+---------------+-----+--------------+
-        |  a|                 b|              c|    d|             e|
-        +---+------------------+---------------+-----+--------------+
-        |[1]|[1, 2, 3, 4, 5, 6]|[11,, 22,, 33,]|[foo]|  [1,, 2,, 3,]|
-        |[2]|                []|             []|   []|[111,,, 222,,]|
-        +---+------------------+---------------+-----+--------------+
-
+        +---------+------------------+----------------+-----------+---------------+
+        |        a|                 b|               c|          d|              e|
+        +---------+------------------+----------------+-----------+---------------+
+        |[,,,,, 1]|[1, 2, 3, 4, 5, 6]|[, 11,, 22,, 33]|[, foo,,,,]|  [, 1,, 2,, 3]|
+        |[,,,,, 2]|           [,,,,,]|         [,,,,,]|    [,,,,,]|[,, 111,,, 222]|
+        +---------+------------------+----------------+-----------+---------------+
 
 4. run **arrays_zip** and **explode**:
 
@@ -61,19 +65,20 @@ Use the Spark SQL higher-order function: transform(), do the following:
         +----+----+---+---+----+
         |   a|   b|  c|  d|   e|
         +----+----+---+---+----+
-        |   1|   1| 11|foo|   1|
-        |null|   2|   |   |null|
-        |null|   3| 22|   |   2|
-        |null|   4|   |   |null|
-        |null|   5| 33|   |   3|
-        |null|   6|   |   |null|
-        |   2|null|   |   | 111|
+        |null|   1|   |   |null|
+        |null|   2| 11|foo|   1|
+        |null|   3|   |   |null|
+        |null|   4| 22|   |   2|
+        |null|   5|   |   |null|
+        |   1|   6| 33|   |   3|
         |null|null|   |   |null|
         |null|null|   |   |null|
-        |null|null|   |   | 222|
+        |null|null|   |   | 111|
         |null|null|   |   |null|
         |null|null|   |   |null|
+        |   2|null|   |   | 222|
         +----+----+---+---+----+
+
 
     **Note**: `fillna('', subset=cols)` only changed columns containing Strings
 
@@ -81,7 +86,7 @@ In one method chain:
 --------------------
 
     df_new = df.withColumn('a', F.array('a')) \
-               .selectExpr(*[ stmt.format(c) for c in cols ]) \
+               .selectExpr(*[ stmt.format(c,N) for c in cols ]) \
                .withColumn('vals', F.explode(F.arrays_zip(*cols))) \
                .select('vals.*') \
                .fillna('', subset=cols)
@@ -89,14 +94,14 @@ In one method chain:
 
 *** Explanation with the transform function***
 
-The transform function (list below):
+The transform function (list below, reflect to an old revision of requirements)
 
     transform(sequence(0,5), x -> IF((x*size({0}))%6 == 0, {0}[int(x*size({0})/6)], NULL))
 
 As mentioned in the post, {0} will be replaced with column name. Here we use column-c which 
 contains 3 elements as an example:
 
-* In the transform function, sequence(0,5) yields a constant array `array(0,1,2,3,4,5)` with 6-elements, and the rest are the lambda function with one argument `x` which is the value of elements.
+* In the transform function, sequence(0,5) yields a constant array `array(0,1,2,3,4,5)` with 6-elements, and the rest sets the lambda function with one argument `x` having the value of elements.
 
 * IF(condition, true_value, false_value): is a standard SQL function
 
@@ -109,8 +114,7 @@ contains 3 elements as an example:
     ((4*3)%6)==0) true   -->  c[int(4*3/6)] = c[2]
     ((5*3)%6)==0) false  -->  NULL
 
-Similar to column-e which contains a 2-element array. In this code, we just re-align 
-the arrays when they contain 2 or 3 elements. 
+Similar to column-e which contains a 2-element array. 
 
 [1]: https://docs.databricks.com/_static/notebooks/apache-spark-2.4-functions.html
 
