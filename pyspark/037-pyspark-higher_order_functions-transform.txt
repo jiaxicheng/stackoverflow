@@ -29,10 +29,10 @@ Use the Spark SQL higher-order function: transform(), do the following:
 
         stmt = '''
             CASE
-              WHEN size({0}) in (2,3) THEN
-                transform(sequence(0,5), x -> IF((x*size({0}))%6 == 0, {0}[int(x*size({0})/6)], NULL)) 
-              ELSE {0}
-            END AS {0}
+              WHEN size(`{0}`) in (2,3) THEN
+                transform(sequence(0,5), x -> IF((x*size(`{0}`))%6 == 0, `{0}`[int(x*size(`{0}`)/6)], NULL)) 
+              ELSE `{0}`
+            END AS `{0}`
         '''
 
     **Note:** array transformation only defined when array contains 2 or 3 elements. arrays with other size will be kept as-is. 
