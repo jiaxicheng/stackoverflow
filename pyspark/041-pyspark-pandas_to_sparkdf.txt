@@ -1,6 +1,7 @@
 
 https://stackoverflow.com/questions/57070594/make-and-populate-a-pyspark-dataframe-with-columns-as-period-range
 
+
 Set up the data from the original post.
 
     import pandas as pd
@@ -8,31 +9,34 @@ Set up the data from the original post.
 
     #... skip the code to initialize spark and df
 
-    >>> df.show()
-    +---+---+----------+----------+
-    |id_|  p|        d1|        d2|
-    +---+---+----------+----------+
-    |  1|  A|2018-09-26|2018-10-26|
-    |  2|  B|2018-06-21|2018-07-19|
-    |  2|  B|2018-08-13|2018-10-07|
-    |  2|  B|2018-12-31|2019-02-27|
-    |  2|  B|2019-05-28|2019-06-25|
-    |  3|  C|2018-06-15|2018-07-13|
-    |  3|  C|2018-08-15|2018-10-09|
-    |  3|  C|2018-12-03|2019-03-12|
-    |  3|  C|2019-05-10|2019-06-07|
-    |  4|  A|2019-01-30|2019-03-01|
-    |  4|  A|2019-05-30|2019-07-25|
-    |  5|  C|2018-09-19|2018-10-17|
-    +---+---+----------+----------+
+    # if d1 and d2 are read as String, convert them to timestamp using the following
+    df = df.withColumn('d1', F.to_timestamp('d1')) \
+           .withColumn('d2', F.to_timestamp('d2'))
 
-    
+    >>> df.show()
+    +---+---+-------------------+-------------------+
+    |id_|  p|                 d1|                 d2|
+    +---+---+-------------------+-------------------+
+    |  1|  A|2018-09-26 00:00:00|2018-10-26 00:00:00|
+    |  2|  B|2018-06-21 00:00:00|2018-07-19 00:00:00|
+    |  2|  B|2018-08-13 00:00:00|2018-10-07 00:00:00|
+    |  2|  B|2018-12-31 00:00:00|2019-02-27 00:00:00|
+    |  2|  B|2019-05-28 00:00:00|2019-06-25 00:00:00|
+    |  3|  C|2018-06-15 00:00:00|2018-07-13 00:00:00|
+    |  3|  C|2018-08-15 00:00:00|2018-10-09 00:00:00|
+    |  3|  C|2018-12-03 00:00:00|2019-03-12 00:00:00|
+    |  3|  C|2019-05-10 00:00:00|2019-06-07 00:00:00|
+    |  4|  A|2019-01-30 00:00:00|2019-03-01 00:00:00|
+    |  4|  A|2019-05-30 00:00:00|2019-07-25 00:00:00|
+    |  5|  C|2018-09-19 00:00:00|2018-10-17 00:00:00|
+    +---+---+-------------------+-------------------+
+
     >>> df.printSchema()
     root
      |-- id_: string (nullable = true)
      |-- p: string (nullable = true)
-     |-- d1: string (nullable = true)
-     |-- d2: string (nullable = true)
+     |-- d1: timestamp (nullable = true)
+     |-- d2: timestamp (nullable = true)
 
 
 Get min(d1) for `start_date` and max(d2) for `end_date`: 
@@ -40,42 +44,41 @@ Get min(d1) for `start_date` and max(d2) for `end_date`:
     d = df.select(F.min('d1').alias('start_date'), F.max('d2').alias('end_date')).first()
 
     >>> d
-    Row(start_date=u'2018-06-15', end_date=u'2019-07-25')
+    Row(start_date=datetime.datetime(2018, 6, 15, 0, 0), end_date=datetime.datetime(2019, 7, 25, 0, 0))
 
-Get a list of dates and convert them to String
+Get a list of dates and convert them to timestamp()
 
-    cols = [ c.strftime('%Y-%m-%d') for c in pd.period_range(d.start_date, d.end_date, freq='D') ]
+    cols = [ c.to_timestamp() for c in pd.period_range(d.start_date, d.end_date, freq='D') ]
+
     >>> cols
-    [u'2018-06-15',
-     u'2018-06-16',
-     .....
-     u'2019-07-23',
-     u'2019-07-24',
-     u'2019-07-25']
+    [Timestamp('2018-06-15 00:00:00'),
+     Timestamp('2018-06-16 00:00:00'),
+     Timestamp('2018-06-17 00:00:00'),
+    ....
+     Timestamp('2019-07-23 00:00:00'),
+     Timestamp('2019-07-24 00:00:00'),
+     Timestamp('2019-07-25 00:00:00')]
 
-Use list comprehension to iterate all dates in `cols`, use F.when(condition) to set up the column values
+Use list comprehension to iterate all dates in `cols`, and convert timestamp to string containing only date as the resulting column name
 
-    result = df.select(*[ F.when((df.d1 <= c)&(df.d2 >= c),1).otherwise(0).alias(c) for c in cols ])
+    result = df.select('id_', *[ F.when((df.d1 <= c)&(df.d2 >= c),1).otherwise(0).alias(c.strftime('%Y-%m-%d')) for c in cols ])
 
-    >>> result.select(d.start_date, '2019-01-01', d.end_date).show()
-    +----------+----------+----------+
-    |2018-06-15|2019-01-01|2019-07-25|
-    +----------+----------+----------+
-    |         0|         0|         0|
-    |         0|         0|         0|
-    |         0|         0|         0|
-    |         0|         1|         0|
-    |         0|         0|         0|
-    |         1|         0|         0|
-    |         0|         0|         0|
-    |         0|         1|         0|
-    |         0|         0|         0|
-    |         0|         0|         0|
-    |         0|         0|         1|
-    |         0|         0|         0|
-    +----------+----------+----------+
-
-**Note:** You probably want to convert d1, d2, cols to timestamp fields for better performance, the method should be
-the same, just do some more date manipulations.
-
+    # check data in some columns
+    result.select('id_', d.start_date.strftime('%Y-%m-%d'), '2019-01-01', d.end_date.strftime('%Y-%m-%d')).show()
+    +---+----------+----------+----------+
+    |id_|2018-06-15|2019-01-01|2019-07-25|
+    +---+----------+----------+----------+
+    |  1|         0|         0|         0|
+    |  2|         0|         0|         0|
+    |  2|         0|         0|         0|
+    |  2|         0|         1|         0|
+    |  2|         0|         0|         0|
+    |  3|         1|         0|         0|
+    |  3|         0|         0|         0|
+    |  3|         0|         1|         0|
+    |  3|         0|         0|         0|
+    |  4|         0|         0|         0|
+    |  4|         0|         0|         1|
+    |  5|         0|         0|         0|
+    +---+----------+----------+----------+
 
