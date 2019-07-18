@@ -1,0 +1,55 @@
+
+https://stackoverflow.com/questions/57090416/pyspark-compare-columns-of-one-df-with-the-rows-of-a-second-df
+
+Data:
+
+    from pyspark.sql import functions as F
+
+    >>> df1.show()
+    +---------+---------+----+----+----+
+    |        X|        Y|Col1|Col2|Col3|
+    +---------+---------+----+----+----+
+    |Value_X_1|Value_Y_1|5000| 250| 500|
+    |Value_X_2|Value_Y_2|1000|  30| 300|
+    |Value_X_3|Value_Y_3|   0| 100| 100|
+    +---------+---------+----+----+----+
+    
+    >>> df2.show()
+    +----+----+---+
+    |name| max|min|
+    +----+----+---+
+    |Col1|2500|  0|
+    |Col2| 120|  0|
+    |Col3| 400|  0|
+    +----+----+---+
+
+    # concerned columns
+    cols = df1.columns[2:]
+    >>> cols
+    ['Col1', 'Col2', 'Col3']
+
+Create a map from df2:
+
+    map1 = { r.name:[r.min, r.max] for r in df2.collect() }
+
+    >>> map1
+    {u'Col1': [0, 2500], u'Col2': [0, 120], u'Col3': [0, 400]}
+
+Add new field 'Problem' based on two when() functions, use a list comprehension to iterate through all concerned columns:
+
+>* F.when(df1[c].between(min, max), 0).otherwise(1))
+>* F.when(sum(...) > 0, 'Yes').otherwise('No')
+
+We set a flag(0 or 1) with the first when() function for each concerned column, and then take the sum on this flag. if it's greater than 0 then Problem = 'Yes', otherwise 'No':
+
+    df_new = df1.withColumn('Problem', F.when(sum([ F.when(df1[c].between(map1[c][0], map1[c][1]), 0).otherwise(1) for c in cols ]) > 0, 'Yes').otherwise('No'))
+
+    >>> df_new.show()
+    +---------+---------+----+----+----+-------+
+    |        X|        Y|Col1|Col2|Col3|Problem|
+    +---------+---------+----+----+----+-------+
+    |Value_X_1|Value_Y_1|5000| 250| 500|    Yes|
+    |Value_X_2|Value_Y_2|1000|  30| 300|     No|
+    |Value_X_3|Value_Y_3|   0| 100| 100|     No|
+    +---------+---------+----+----+----+-------+
+
