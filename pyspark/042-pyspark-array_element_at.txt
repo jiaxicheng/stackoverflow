@@ -1,0 +1,36 @@
+https://stackoverflow.com/questions/40467936/how-do-i-get-the-last-item-from-a-list-using-pyspark
+
+To get the last element from an array column:
+
+For Spark 2.40+, use pyspark.sql.functions.element_at, see below from the documentation:
+
+    element_at(array, index) - Returns element of array at given (1-based) index. 
+    If index < 0, accesses elements from the last to the first. 
+    Returns NULL if the index exceeds the length of the array.
+
+
+    from pyspark.sql.functions import element_at, split, col
+
+    df = spark.createDataFrame([('a b c d',)], ['s',])
+
+    df_new = df.withColumn('arr', split(df.s, ' ')) \
+               .select( col('arr')[0].alias('0th')
+                      , col('arr')[3].alias('3rd')
+                      , element_at(col('arr'), -1).alias('1st_from_end')
+                )
+    >>> df_new.show()
+    +---+---+------------+
+    |0th|3rd|1st_from_end|
+    +---+---+------------+
+    |  a|  d|           d|
+    +---+---+------------+
+
+Anther example using Spark SQL:
+
+    >>> df.selectExpr('element_at(array(5,3,2,6), -1) AS 1st_from_end').show()
+    +------------+
+    |1st_from_end|
+    +------------+
+    |           6|
+    +------------+
+
