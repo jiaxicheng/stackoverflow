@@ -1,0 +1,37 @@
+https://stackoverflow.com/questions/57112873/how-to-convert-some-pyspark-dataframes-column-into-a-dict-with-its-column-name/57113368
+
+Generate an JSON field based on dataframe columns, a good example using to_json() function
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([
+             (1388534400, "GOOG", 50, 'a', 1),
+             (1388534400, "FB", 60, 'b', 2)
+           , (1388534400, "MSFT", 55, 'c', 3)
+           , (1388620800, "GOOG", 52, 'd', 4)
+         ], ["date", "stock", "price", 'tag', 'num'])
+
+    >>> df.show()
+    +----------+-----+-----+---+---+
+    |      date|stock|price|tag|num|
+    +----------+-----+-----+---+---+
+    |1388534400| GOOG|   50|  a|  1|
+    |1388534400|   FB|   60|  b|  2|
+    |1388534400| MSFT|   55|  c|  3|
+    |1388620800| GOOG|   52|  d|  4|
+    +----------+-----+-----+---+---+
+
+    df_new = df.withColumn('A', F.struct('stock', 'price')) \
+               .withColumn('B', F.struct('date', 'num')) \
+               .select('tag', F.to_json(F.struct('A', 'B')).alias('data'))
+    
+    >>> df_new.show(6,0)
+    +---+-----------------------------------------------------------------+
+    |tag|data                                                             |
+    +---+-----------------------------------------------------------------+
+    |a  |{"A":{"stock":"GOOG","price":50},"B":{"date":1388534400,"num":1}}|
+    |b  |{"A":{"stock":"FB","price":60},"B":{"date":1388534400,"num":2}}  |
+    |c  |{"A":{"stock":"MSFT","price":55},"B":{"date":1388534400,"num":3}}|
+    |d  |{"A":{"stock":"GOOG","price":52},"B":{"date":1388620800,"num":4}}|
+    +---+-----------------------------------------------------------------+
+    
