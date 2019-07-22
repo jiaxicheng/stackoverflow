@@ -1,0 +1,103 @@
+
+https://stackoverflow.com/questions/39235704/split-spark-dataframe-string-column-into-multiple-columns
+
+Note: 
+---
+ + below can be handled by list comprehension.
+ + this potentially means that a solution used to need a list comprehension 
+   can also be implemented with transform(array(...), x -> func(c))
+
+With Spark 2.40+, this task can be much easier with the Spark SQL builtin function: transform()
+
+    from pyspark.sql.functions import split, expr, col
+
+    df = spark.createDataFrame(
+        [
+            [1, 'A, B, C, D'], 
+            [2, 'E, F, G'], 
+            [3, 'H, I'], 
+            [4, 'J']
+        ]
+        , ["num", "letters"]
+    )
+    >>> df.show()
+    +---+----------+
+    |num|   letters|
+    +---+----------+
+    |  1|A, B, C, D|
+    |  2|   E, F, G|
+    |  3|      H, I|
+    |  4|         J|
+    +---+----------+
+
+Find the max number of elements an array might contain:
+
+    N = df.selectExpr("max(size(split(letters,', '))) AS t_size").first().t_size
+
+    >>> N
+    4
+
+Setup the SQL statement, using the builtin function transform():
+
+**Note:** sequence(0,N-1) generate a constant array(0,..,N-1), we will use this sequence to generate
+an array of size-N with value from intermediate column data == split(letters, ', ')
+
+    stmt = '''
+        transform(sequence(0,{0}-1), x -> data[x]) AS letters
+    '''
+
+New Dataframe split the string into aligned-to-left columns:
+
+    df_new = df.withColumn('data', split('letters', ', ')) \
+               .withColumn('letters', expr(stmt.format(N))) \
+               .select('num', *[ col('letters')[i].alias('letter{}'.format(i)) for i in range(N)]) 
+
+    >>> df_new.show()
+    +---+-------+-------+-------+-------+
+    |num|letter0|letter1|letter2|letter3|
+    +---+-------+-------+-------+-------+
+    |  1|      A|      B|      C|      D|
+    |  2|      E|      F|      G|   null|
+    |  3|      H|      I|   null|   null|
+    |  4|      J|   null|   null|   null|
+    +---+-------+-------+-------+-------+
+
+If you want to align the array elements to the right, then do the following:
+
+    stmt = '''                                            
+        transform(sequence(0,{0}), x -> data[x - {0} + size(data)]) AS letters
+    '''
+
+    df_new = df.withColumn('data', split('letters', ', ')) \
+               .withColumn('letters', expr(stmt.format(N))) \
+               .select('num', *[ col('letters')[i].alias('letter{}'.format(i)) for i in range(N)])
+
+    >>> df_new.show()                                           
+    +---+-------+-------+-------+-------+
+    |num|letter0|letter1|letter2|letter3|
+    +---+-------+-------+-------+-------+
+    |  1|      A|      B|      C|      D|
+    |  2|   null|      E|      F|      G|
+    |  3|   null|   null|      H|      I|
+    |  4|   null|   null|   null|      J|
+    +---+-------+-------+-------+-------+
+
+Another Method: use list comprehension to get the same result, i.e.
+
+    df_new = df.withColumn('data', split('letters', ', ')) \
+               .select('num', *[ F.col('data')[i].alias('letter{}'.format(i)) for i in range(4)]) \
+
+    >>> df_new.show()
+    +---+-------+-------+-------+-------+
+    |num|letter0|letter1|letter2|letter3|
+    +---+-------+-------+-------+-------+
+    |  1|      A|      B|      C|      D|
+    |  2|      E|      F|      G|   null|
+    |  3|      H|      I|   null|   null|
+    |  4|      J|   null|   null|   null|
+    +---+-------+-------+-------+-------+
+    
+However, to align to the right is not doable with list-comprehension since F.size() is a vector not able to be used as index of array items.
+
+
+
