@@ -1,0 +1,78 @@
+
+https://stackoverflow.com/questions/57166311/rolling-sum-of-a-column-based-on-another-column-in-a-dataframe
+
+With pyspark, one can do the following:
+
+Method-1: Window function, sum and RangeBetween
+
+    from pyspark.sql import functions as F, Window
+ 
+    # skip code to initialize Spark session and dataframe   
+ 
+    >>> df.show()
+    +-----+----------+------+
+    |   ID|      Date|Amount|
+    +-----+----------+------+
+    |10001|2019-07-01|    50|
+    |10001|2019-05-01|    15|
+    |10001|2019-06-25|    10|
+    |10001|2019-05-27|    20|
+    |10002|2019-06-29|    25|
+    |10002|2019-07-18|    35|
+    |10002|2019-07-15|    40|
+    +-----+----------+------+
+       
+    >>> df.printSchema()
+    root
+     |-- ID: long (nullable = true)
+     |-- Date: string (nullable = true)
+     |-- Amount: long (nullable = true)
+
+    win = Window.partitionBy('ID').orderBy(F.to_timestamp('Date').astype('long')).rangeBetween(-28*86400,0)
+    
+    df_new = df.withColumn('amount_4wk_rolling', F.sum('Amount').over(win)) 
+    
+    >>> df_new.show()
+    +------+-----+----------+------------------+                                    
+    |Amount|   ID|      Date|amount_4wk_rolling|
+    +------+-----+----------+------------------+
+    |    25|10002|2019-06-29|                25|
+    |    40|10002|2019-07-15|                65|
+    |    35|10002|2019-07-18|               100|
+    |    15|10001|2019-05-01|                15|
+    |    20|10001|2019-05-27|                35|
+    |    10|10001|2019-06-25|                10|
+    |    50|10001|2019-07-01|                60|
+    +------+-----+----------+------------------+
+
+
+Method-2: use Interval and Spark SQL Syntax(**tested on Spark 2.40**)
+
+    stmt = '''
+         SUM(Amount) OVER ( 
+             PARTITION BY `ID` 
+             ORDER BY CAST(`Date` AS timestamp) 
+             RANGE BETWEEN INTERVAL 28 DAYS PRECEDING AND CURRENT ROW 
+         ) AS amount_4wk_rolling 
+    '''
+
+    df_new = df.selectExpr('*', stmt)
+    
+    >>> df_new.show()
+    +------+-----+----------+------------------+                                    
+    |Amount|   ID|      Date|amount_4wk_rolling|
+    +------+-----+----------+------------------+
+    |    25|10002|2019-06-29|                25|
+    |    40|10002|2019-07-15|                65|
+    |    35|10002|2019-07-18|               100|
+    |    15|10001|2019-05-01|                15|
+    |    20|10001|2019-05-27|                35|
+    |    10|10001|2019-06-25|                10|
+    |    50|10001|2019-07-01|                60|
+    +------+-----+----------+------------------+
+
+Note: In spark DF functions, orderBY must be casted to numeric type, but in SQL syntax, Order BY can be timestamp.
+
+REF link: https://stackoverflow.com/questions/33207164/spark-window-functions-rangebetween-dates
+
+
