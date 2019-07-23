@@ -1,0 +1,95 @@
+Question
+
+https://stackoverflow.com/questions/57086759/how-to-get-a-list-column-with-values-of-multiple-columns-given-in-another-column
+
+For Spark 2.40+, use the builtin SQL function transform():
+
+Data Setup
+----------
+
+    myValues = [(1,2,0,3,4,['col1','col2']),(1,2,0,3,4,['col2','col3']),
+                (1,2,0,3,4,['col1','col3']),(1,2,0,3,4,['col3','col4']),
+                (1,2,0,3,4,['col2','col5']),(1,2,0,3,4,['col4','col5'])]
+
+    df = spark.createDataFrame(myValues,['col1','col2','col3','col4','col5','colList'])
+
+    >>> df.show()
+    +----+----+----+----+----+------------+
+    |col1|col2|col3|col4|col5|     colList|
+    +----+----+----+----+----+------------+
+    |   1|   2|   0|   3|   4|[col1, col2]|
+    |   1|   2|   0|   3|   4|[col2, col3]|
+    |   1|   2|   0|   3|   4|[col1, col3]|
+    |   1|   2|   0|   3|   4|[col3, col4]|
+    |   1|   2|   0|   3|   4|[col2, col5]|
+    |   1|   2|   0|   3|   4|[col4, col5]|
+    +----+----+----+----+----+------------+
+
+    # columns that involved in colList    
+    cols = df.columns[1:5]
+    
+Set up the SQL statement
+------------------------
+SQL statement to map column names in colList into the corresponding column fields
+
+**Note:** use CONCAT(x, '') to convert x into a String and solve the issue with data type mismatch ERROR
+
+    stmt = '''
+    
+        transform(colList, x -> 
+            CASE CONCAT(x, '')
+                WHEN 'col1' THEN `col1`
+                WHEN 'col2' THEN `col2`
+                WHEN 'col3' THEN `col3`
+                WHEN 'col4' THEN `col4`
+                WHEN 'col5' THEN `col5`
+                ELSE NULL
+            END
+        )
+    
+    '''
+
+Run the SQL with F.expr():
+--------------------------
+
+    df_new = df.withColumn('new_list', F.expr(stmt))
+
+    >>> df_new.show()
+    +----+----+----+----+----+------------+--------+
+    |col1|col2|col3|col4|col5|     colList|new_list|
+    +----+----+----+----+----+------------+--------+
+    |   1|   2|   0|   3|   4|[col1, col2]|  [1, 2]|
+    |   1|   2|   0|   3|   4|[col2, col3]|  [2, 0]|
+    |   1|   2|   0|   3|   4|[col1, col3]|  [1, 0]|
+    |   1|   2|   0|   3|   4|[col3, col4]|  [0, 3]|
+    |   1|   2|   0|   3|   4|[col2, col5]|  [2, 4]|
+    |   1|   2|   0|   3|   4|[col4, col5]|  [3, 4]|
+    +----+----+----+----+----+------------+--------+
+
+
+Dynamically generate SQL statement:
+-----------------------------------
+For more columns, use the following code to dynamically create the stmt:
+
+    when_cases = '\n'.join([ "WHEN '{0}' THEN `{0}`".format(c) for c in cols ])
+
+    stmt = '''transform(colList, x -> CASE CONCAT(x, '') {0} ELSE NULL END)'''.format(when_cases)
+
+    >>> print(stmt)
+    transform(colList, x -> CASE CONCAT(x, '') WHEN 'col1' THEN `col1`
+    WHEN 'col2' THEN `col2`
+    WHEN 'col3' THEN `col3`
+    WHEN 'col4' THEN `col4`
+    WHEN 'col5' THEN `col5` ELSE NULL END)
+
+
+Some notes:
+-----------
+  
+  + ERROR due to data type mismatch: THEN and ELSE expressions should all be same type or coercible to a common type: 
+    (namedlambdavariable() = 'col1')   
+    + String(x) == 'col1'     <-- not working
+    + CONCAT(x, '') == 'col1'    <-- works
+
+  + col1 as String or Fieldname, use the WHEN/CASE statement to do the mapping
+
