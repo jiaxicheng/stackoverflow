@@ -1,0 +1,33 @@
+https://stackoverflow.com/questions/56590112/pyspark-explode-stringified-array-of-dictionaries-into-rows/56591042#56591042
+    
+You can use functions.from_json() and with pyspark 2.4+, you can use functions.schema_of_json(json)
+to infer the JSON schema. see below example:
+
+http://spark.apache.org/docs/2.4.0/api/python/pyspark.sql.html#pyspark.sql.functions.from_json
+http://spark.apache.org/docs/2.4.0/api/python/pyspark.sql.html#pyspark.sql.functions.schema_of_json
+
+
+    # a sample json string
+    edges_json_sample = r'[{"distance":4.382441320292239,"duration":1.5,"speed":2.9,"nodeIDs":{"nodeA":954752475,"nodeB":1665827480}},{"distance":14.48582171131768,"duration":2.6,"speed":5.6,"nodeIDs":{"nodeA":1665827480,"nodeB":3559056131}}]'
+    
+    # infer schema from the sample string
+    schema = df.select(F.schema_of_json(edges_json_sample).alias('schema')).first()['schema']
+    
+    >>> schema
+    u'array<struct<distance:double,duration:double,nodeIDs:struct<nodeA:bigint,nodeB:bigint>,speed:double>>'
+    
+    # convert json string to data structure and then retrieve it
+    new_df = df.withColumn('data', F.explode(F.from_json('edges', schema))) \
+               .select('*', 'data.*', 'data.nodeIDs.*') \
+               .drop('data', 'nodeIDs', 'edges')
+    
+    >>> new_df
+    +-----+-----+--------------------+----------+-----------------+--------+-----+----------+----------+
+    |count|level|           timestamp|trace_uuid|         distance|duration|speed|     nodeA|     nodeB|
+    +-----+-----+--------------------+----------+-----------------+--------+-----+----------+----------+
+    |  156|   36|2019-05-20T10:36:...|      aaaa|4.382441320292239|     1.5|  2.9| 954752475|1665827480|
+    |  156|   36|2019-05-20T10:36:...|      aaaa|14.48582171131768|     2.6|  5.6|1665827480|3559056131|
+    |  179|  258|2019-05-20T11:36:...|      bbbb|              0.0|     0.0|  0.0| 520686131| 520686216|
+    |  179|  258|2019-05-20T11:36:...|      bbbb|8.654358326561642|     3.1|  2.8| 520686216| 506361795|
+    +-----+-----+--------------------+----------+-----------------+--------+-----+----------+----------+
+    
