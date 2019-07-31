@@ -64,4 +64,15 @@ where the **array_T** is from the following transformation:
 
 which iterate through the array `fruit`, if the value of fruit[i] = x , then return the corresponding qty[i], otherwise return 0. for example when x = 'orange', it returns an array `[0, 0, 3, 0]`
 
+**Note:** Troubleshooting with the following ERROR message:
+> u"cannot resolve 'aggregate(transform(sequence(0, (size(`fruit`) - 1)), lambdafunction((IF((`fruit`[namedlambdavariable()] = namedlambdavariable()), `qty`[namedlambdavariable()], CAST(0 AS BIGINT))), namedlambdavariable())), 0, lambdafunction((CAST(namedlambdavariable() AS BIGINT) + namedlambdavariable()), namedlambdavariable(), namedlambdavariable()), lambdafunction(namedlambdavariable(), namedlambdavariable()))' due to data type mismatch: argument 3 requires int type, however, 'lambdafunction((CAST(namedlambdavariable() AS BIGINT) + namedlambdavariable()), namedlambdavariable(), namedlambdavariable())' is of bigint type.;line 2 pos 4;\nProject [transform(uniq_fruit#301, lambdafunction(aggregate(transform(sequence(0, (size(fruit#2) - 1), None, Some(America/New_York)), lambdafunction(if ((fruit#2[lambda i#309] = lambda x#308)) qty#3[lambda i#309] else cast(0 as bigint), lambda i#309, false)), 0, lambdafunction((cast(lambda y#310 as bigint) + lambda z#311L), lambda y#310, lambda z#311L, false), lambdafunction(lambda id#312, lambda id#312, false)), lambda x#308, false)) AS sum_fruit#307]\n+- Project [ID#0L, name#1, fruit#2, qty#3, array_distinct(fruit#2) AS uniq_fruit#301]\n   +- LogicalRDD [ID#0L, name#1, fruit#2, qty#3], false\n"
+
+The error was resolved by changing the 3rd argument in aggregate function from
+
+    (y,z) -> y+z   
+
+to   
+
+    (y,x) -> int(y+z)
+
 
