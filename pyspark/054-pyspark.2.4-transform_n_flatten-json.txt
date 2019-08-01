@@ -1,0 +1,35 @@
+https://stackoverflow.com/questions/57285628/spark-error-when-selecting-a-column-from-a-struct-in-a-nested-array
+
+(1) For spark 2.4+, use Spark SQL built-in functions: transform + flatten:
+
+    >>> mydf1.selectExpr('flatten(transform(home.array_a.array_b, x -> x.a)) as array_field_inside_array').show()
+    +------------------------+
+    |array_field_inside_array|
+    +------------------------+
+    |                  [1, 3]|
+    +------------------------+
+
+Where we use **transform()** function to retrieve the values of field `a` of each array element of `home.array_a.array_b` and transform them to the array `[[1], [3]]`. then flatten this array into [1, 3]. If you need the result to be `[[1, 3]]`, then just add array() function
+
+    array(flatten(transform(home.array_a.array_b, x -> x.a)))
+
+
+(2) For Spark < 2.4, get_json_object + from_json + flatten:
+
+
+    from pyspark.sql.functions import flatten, to_json, from_json, get_json_object
+
+    new_df = mydf1.withColumn('home_json', F.to_json('home')) \
+                  .select(flatten(
+                          from_json(get_json_object('home_json', '$.array_a[*].array_b[*].a')
+                                  , u'array<array<string>>')
+                      ).alias('array_field_inside_array')
+                  )
+
+    >>> new_df.show()
+    +------------------------+
+    |array_field_inside_array|
+    +------------------------+
+    |                  [1, 3]|
+    +------------------------+
+
