@@ -6,7 +6,7 @@ https://stackoverflow.com/questions/57291746/pyspark-udf-to-return-result-simila
 
     # set up data
     spark_df = spark.createDataFrame([
-            (101, 'Mark', fruit_list, qty_list)
+            (101, 'Mark', ['apple', 'apple', 'orange', 'apple'], [16, 2, 3, 1])
           , (102, 'Twin', ['apple', 'banana', 'avocado', 'banana', 'avocado'], [5, 2, 11, 3, 1])
           , (103, 'Smith', ['avocado'], [10])
         ], ['ID', 'name', 'fruit', 'qty']
