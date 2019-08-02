@@ -1,0 +1,48 @@
+https://stackoverflow.com/questions/57263979/how-to-perform-a-multi-row-multi-column-operation-in-parallel-within-pyspark-wi
+
+Window functions should be faster than groupBy + join
++ collect_list() + struct() to construct the data
++ use Window spec (Window.unboundedPreceding, Window.unboundedFollowing) to get whole list in the same Partition
+
+    from pyspark.sql import Window, functions as F
+
+    df = spark.createDataFrame([
+            ('NewYork', 1500, 67, 57)
+          , ('NewYork', 1600, 69, 55)
+          , ('NewYork', 1700, 70, 56)
+          , ('Dallas', 1500, 47, 37)
+          , ('Dallas', 1600, 49, 35)
+          , ('Dallas', 1700, 50, 39)
+        ], ['city', 'time', 'temp', 'humid']
+    )
+
+    >>> df.show()
+    +-------+----+----+-----+
+    |   city|time|temp|humid|
+    +-------+----+----+-----+
+    |NewYork|1500|  67|   57|
+    |NewYork|1600|  69|   55|
+    |NewYork|1700|  70|   56|
+    | Dallas|1500|  47|   37|
+    | Dallas|1600|  49|   35|
+    | Dallas|1700|  50|   39|
+    +-------+----+----+-----+
+
+    # specify the Window specs
+    w1 = Window.partitionBy('city').orderBy('time').rowsBetween(Window.unboundedPreceding,Window.unboundedFollowing)
+
+    # create the collect_list on the above win spec
+    >>> df.withColumn('timetemp', F.collect_list(F.struct('time','temp')).over(w1)).show(10,0)
+    +-------+----+----+-----+------------------------------------+                  
+    |city   |time|temp|humid|timetemp                            |
+    +-------+----+----+-----+------------------------------------+
+    |Dallas |1500|47  |37   |[[1500, 47], [1600, 49], [1700, 50]]|
+    |Dallas |1600|49  |35   |[[1500, 47], [1600, 49], [1700, 50]]|
+    |Dallas |1700|50  |39   |[[1500, 47], [1600, 49], [1700, 50]]|
+    |NewYork|1500|67  |57   |[[1500, 67], [1600, 69], [1700, 70]]|
+    |NewYork|1600|69  |55   |[[1500, 67], [1600, 69], [1700, 70]]|
+    |NewYork|1700|70  |56   |[[1500, 67], [1600, 69], [1700, 70]]|
+    +-------+----+----+-----+------------------------------------+
+
+
+
