@@ -65,6 +65,8 @@ Where we use **transform()** function to retrieve the values of field `a` of eac
     |                  [1, 3]|
     +------------------------+
 
+Note: the argument of flatten() function must be an array of arrays. flatten(home.array_a) will yield ERROR since
+home.array_a is an array of structs
 
 (3) For Spark < 2.4, get_json_object + from_json + flatten:
 
