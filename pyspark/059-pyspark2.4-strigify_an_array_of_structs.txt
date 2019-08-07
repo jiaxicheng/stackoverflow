@@ -1,0 +1,37 @@
+https://stackoverflow.com/questions/57381557/pyspark-converting-an-array-of-struct-into-string
+
+For Spark 2.4+, use array_join + transform:
+
+    >>> df1.show(2,0)
+    +----+----------------------+                                                   
+    |name|score_list            |
+    +----+----------------------+
+    |Tom |(math,90)|(physics,70)|
+    |Amy |(math,95)             |
+    +----+----------------------+
+    
+    >>> df1.printSchema()
+    root
+     |-- name: string (nullable = true)
+     |-- score_list: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- subject: string (nullable = true)
+     |    |    |-- score: integer (nullable = true)
+    
+    
+    >>> df1.selectExpr(
+            "name"
+          , "array_join(transform(score_list, x -> concat('(', x.subject, ', ', x.score, ')')), ' | ') AS score_list"
+    ).show(2,0)
+    +----+--------------------------+                                               
+    |name|score_list                |
+    +----+--------------------------+
+    |Tom |(math, 90) | (physics, 70)|
+    |Amy |(math, 95)                |
+    +----+--------------------------+
+
+Note:
+(1) Use transform() to convert struct into string with concat() function.
+(2) Use array_join() to join array elements.
+
+Note: array_join() only works for array of strings.
