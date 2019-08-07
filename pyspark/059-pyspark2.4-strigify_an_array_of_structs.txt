@@ -1,8 +1,23 @@
-https://stackoverflow.com/questions/57381557/pyspark-converting-an-array-of-struct-into-string
+structs: https://stackoverflow.com/questions/57381557/pyspark-converting-an-array-of-struct-into-string
+maps: https://stackoverflow.com/questions/57283620/dump-array-of-map-column-of-a-spark-dataframe-into-csv-file
 
 For Spark 2.4+, use array_join + transform:
 
+#############
+Task-1: stringify array of structs
+
 In the following example, df1.score_list column contains an array of structs, see below schema:
+  
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([
+              ('Tom', 'math', 90)
+            , ('Tom', 'physics', 70)
+            , ('Amy', 'math', 95)
+        ], ['name', 'subject', 'score']
+    )
+
+    df1 = df.groupby('name').agg(F.collect_list(F.struct('subject','score')).alias('score_list'))
 
     >>> df1.printSchema()
     root
@@ -37,3 +52,47 @@ Note:
 (2) Use array_join() to join array elements.
 
 Note: array_join() only works for array of strings.
+
+#############
+Task-2: stringfy array of maps
+
+    df2 = df.groupby('name').agg(F.collect_list(F.create_map('subject','score')).alias('subject_list'))
+
+    >>> df2.printSchema()
+    root
+     |-- name: string (nullable = true)
+     |-- subject_list: array (nullable = true)
+     |    |-- element: map (containsNull = true)
+     |    |    |-- key: string
+     |    |    |-- value: long (valueContainsNull = true)
+
+    >>> df2.show(2,0)
+    +----+-------------------------------+
+    |name|subject_list                   |
+    +----+-------------------------------+
+    |Tom |[[math -> 90], [physics -> 70]]|
+    |Amy |[[math -> 95]]                 |
+    +----+-------------------------------+
+
+    df_new = df2.withColumn('A_map', F.expr('aggregate(subject_list, map(), (x,y) -> map_concat(x,y))')) \
+                .selectExpr('name', """
+                   array_join( 
+                       transform(map_keys(A_map), k -> CONCAT('(', k, ', ', A_map[k], ')'))
+                     , ' | '
+                   ) AS subject_list
+        """)
+
+    >>> df_new.show(2,0)
+    +----+--------------------------+                                               
+    |name|subject_list              |
+    +----+--------------------------+
+    |Tom |(math, 90) | (physics, 70)|
+    |Amy |(math, 95)                |
+    +----+--------------------------+
+
+Note:
+(1) use aggregate() to merge an array of maps into a map `A_map` by using map_concat() function
+(2) get an array of keys from A_map by using map_keys(A_map)
+(3) transform the map into strings through the map_keys:  (k, A_map[k]) 
+(4) join the above array of strings with array_join() function
+
