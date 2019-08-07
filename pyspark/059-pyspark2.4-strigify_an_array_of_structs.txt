@@ -2,14 +2,8 @@ https://stackoverflow.com/questions/57381557/pyspark-converting-an-array-of-stru
 
 For Spark 2.4+, use array_join + transform:
 
-    >>> df1.show(2,0)
-    +----+----------------------+                                                   
-    |name|score_list            |
-    +----+----------------------+
-    |Tom |(math,90)|(physics,70)|
-    |Amy |(math,95)             |
-    +----+----------------------+
-    
+In the following example, df1.score_list column contains an array of structs, see below schema:
+
     >>> df1.printSchema()
     root
      |-- name: string (nullable = true)
@@ -18,7 +12,15 @@ For Spark 2.4+, use array_join + transform:
      |    |    |-- subject: string (nullable = true)
      |    |    |-- score: integer (nullable = true)
     
+    >>> df1.show(2,0)
+    +----+---------------------------+
+    |name|score_list                 |
+    +----+---------------------------+
+    |Tom |[[math, 90], [physics, 70]]|
+    |Amy |[[math, 95]]               |
+    +----+---------------------------+
     
+
     >>> df1.selectExpr(
             "name"
           , "array_join(transform(score_list, x -> concat('(', x.subject, ', ', x.score, ')')), ' | ') AS score_list"
