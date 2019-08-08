@@ -1,0 +1,62 @@
+https://stackoverflow.com/questions/57420752/spark-iterating-through-columns-in-each-row-to-create-a-new-dataframe
+    
+    from pyspark.sql import functions as F    
+
+    df.show()
+    +---------+---------+---------+---------+----------+
+    |     ColA|     ColB|     ColC|     ColD|      ColE|
+    +---------+---------+---------+---------+----------+
+    |     null|sample_1x|sample_1y|     null| sample_1z|
+    |sample2_x|sample2_y|     null|     null|      null|
+    |sample3_x|     null|     null|     null| sample3_y|
+    |sample4_x|sample4_y|     null|sample4_z|sample4_zz|
+    |sample5_x|     null|     null|     null|      null|
+    +---------+---------+---------+---------+----------+
+    
+    cols = df.columns
+    
+    df.select(F.array(cols).alias('arr')).show(10,0)
+    +----------------------------------------------+
+    |arr                                           |
+    +----------------------------------------------+
+    |[, sample_1x, sample_1y,, sample_1z]          |
+    |[sample2_x, sample2_y,,,]                     |
+    |[sample3_x,,,, sample3_y]                     |
+    |[sample4_x, sample4_y,, sample4_z, sample4_zz]|
+    |[sample5_x,,,,]                               |
+    +----------------------------------------------+
+    
+(1) Use udf and export array of arrays:
+
+@F.udf('array<array<string>>')
+def find_route(arr):
+    d = [ (cols[i],e) for i,e in enumerate(arr) if e is not None ]
+    return [ (d[i][1], d[i+1][1], d[i][0]+'_'+d[i+1][0]) for i in range(len(d)-1) ]
+    
+fields = ['From', 'To', 'Label']    
+
+df.select(F.explode(find_route(F.array(cols))).alias('c1')) \
+  .select([ F.col('c1')[i].alias(fields[i]) for i in range(len(fields)) ]) \
+  .show()
+    
+    
+(2) Use F.udf and export array of structs:
+
+    @F.udf('array<struct<From:string,To:string,Label:string>>')
+    def find_route(arr):
+        d = [ (cols[i],e) for i,e in enumerate(arr) if e is not None ]
+        return [ {'From':d[i][1], 'To':d[i+1][1], 'Label':d[i][0]+'_'+d[i+1][0]} for i in range(len(d)-1) ]
+    
+    df.select(F.explode(find_route(F.array(cols))).alias('c1')).select('c1.*').show()
+    +---------+----------+---------+
+    |     From|        To|    Label|
+    +---------+----------+---------+
+    |sample_1x| sample_1y|ColB_ColC|
+    |sample_1y| sample_1z|ColC_ColE|
+    |sample2_x| sample2_y|ColA_ColB|
+    |sample3_x| sample3_y|ColA_ColE|
+    |sample4_x| sample4_y|ColA_ColB|
+    |sample4_y| sample4_z|ColB_ColD|
+    |sample4_z|sample4_zz|ColD_ColE|
+    +---------+----------+---------+
+    
