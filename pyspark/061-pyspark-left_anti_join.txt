@@ -1,0 +1,70 @@
+
+https://stackoverflow.com/questions/57416203/filter-lines-of-a-giant-file-based-on-the-values-from-another-file-in-pyspark
+
+# pyspark's way to set EXISTS and NOT EXISTS condition:
+# Note using dataframe is always prefered than using RDD 
+
+1. read the main data in line-mode
+
+    df = spark.read.text('/psth/to/files')
+
+    df.show(10,90)
+    +------------------------------------------------------------------------------------------+
+    |                                                                                     value|
+    +------------------------------------------------------------------------------------------+
+    |                       <http://www.wikidata.org/entity/Q31> <schema#label> "Beligium"@en .|
+    |                        <http://www.wikidata.org/entity/Q31> <schema#label> "Bilkiya"@ay .|
+    |                       <http://www.wikidata.org/entity/Q31> <schema#label> "Belgique"@fr .|
+    |                        <http://www.wikidata.org/entity/Q31> <schema#label> "Beriyum"@na .|
+    |                          <http://www.wikidata.org/entity/Q54> <schema#label> "Japan"@en .|
+    |                         <http://www.wikidata.org/entity/Q112> <schema#label> "asasa"@en .|
+    |                          <http://www.wikidata.org/entity/Q112> <schema#label> "ssdd"@fr .|
+    |<https://fr.wikipedia.org/wiki/Label_discographique> <http://www.w3.org/1999/02/22-rdf-...|
+    |<https://fr.wikipedia.org/wiki/Label_discographique> <http://schema.org/about> <http://...|
+    +------------------------------------------------------------------------------------------+
+
+2. set up dataframe for the ID list to include
+
+    df_list = spark.read.text('/psth/to/id_list').toDF('id')
+    
+    df_list.show()
+    +---+
+    | id|
+    +---+
+    |Q31|
+    |Q54|
+    +---+
+
+3. set up the regex pattern:
+
+    ptn =  '<http://www.wikidata.org/entity/([A-Z0-9]+)> <schema#label> ".+?"@(?:en|fr) .'
+
+4 retrieve id from value column using the above regex
+
+    df.withColumn('id', F.regexp_extract('value',rg,1)).show()
+    +--------------------+----+
+    |               value|  id|
+    +--------------------+----+
+    |<http://www.wikid...| Q31|
+    |<http://www.wikid...|    |
+    |<http://www.wikid...| Q31|
+    |<http://www.wikid...|    |
+    |<http://www.wikid...| Q54|
+    |<http://www.wikid...|Q112|
+    |<http://www.wikid...|Q112|
+    |<https://fr.wikip...|    |
+    |<https://fr.wikip...|    |
+    +--------------------+----+
+
+5. left_semi join with the df_list
+
+    df.withColumn('id', F.regexp_extract('value',rg,1)).join(df_list,on=['id'], how='left_semi').show()
+    +---+--------------------+                                                      
+    | id|               value|
+    +---+--------------------+
+    |Q31|<http://www.wikid...|
+    |Q31|<http://www.wikid...|
+    |Q54|<http://www.wikid...|
+    +---+--------------------+
+
+Note: might consider broadcast df_list to all workers with F.broadcast(df_list).
