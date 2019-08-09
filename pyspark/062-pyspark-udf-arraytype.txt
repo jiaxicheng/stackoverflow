@@ -28,26 +28,31 @@ https://stackoverflow.com/questions/57420752/spark-iterating-through-columns-in-
     
 (1) Use udf and export array of arrays:
 
-@F.udf('array<array<string>>')
-def find_route(arr):
+def find_route(arr, cols):
     d = [ (cols[i],e) for i,e in enumerate(arr) if e is not None ]
     return [ (d[i][1], d[i+1][1], d[i][0]+'_'+d[i+1][0]) for i in range(len(d)-1) ]
+
+udf_find_route = F.udf(lambda a: find_route(a, cols), 'array<array<string>>')
     
 fields = ['From', 'To', 'Label']    
 
-df.select(F.explode(find_route(F.array(cols))).alias('c1')) \
+df.select(F.explode(udf_find_route(F.array(cols))).alias('c1')) \
   .select([ F.col('c1')[i].alias(fields[i]) for i in range(len(fields)) ]) \
   .show()
     
     
 (2) Use F.udf and export array of structs:
 
-    @F.udf('array<struct<From:string,To:string,Label:string>>')
-    def find_route(arr):
+    # defind function to convert array into array of structs
+    def find_route(arr, cols):
         d = [ (cols[i],e) for i,e in enumerate(arr) if e is not None ]
         return [ {'From':d[i][1], 'To':d[i+1][1], 'Label':d[i][0]+'_'+d[i+1][0]} for i in range(len(d)-1) ]
     
-    df.select(F.explode(find_route(F.array(cols))).alias('c1')).select('c1.*').show()
+    # set up the UDF and add cols as an extra argument
+    udf_find_route = F.udf(lambda a: find_route(a, cols), 'array<struct<From:string,To:string,Label:string>>')
+
+    # retrive the data from the array of structs
+    df.select(F.explode(udf_find_route(F.array(cols))).alias('c1')).select('c1.*').show()
     +---------+----------+---------+
     |     From|        To|    Label|
     +---------+----------+---------+
@@ -60,3 +65,5 @@ df.select(F.explode(find_route(F.array(cols))).alias('c1')) \
     |sample4_z|sample4_zz|ColD_ColE|
     +---------+----------+---------+
     
+Sample data on madison server: 
+  df = spark.read.csv('file:///home/hdfs/test/pyspark/array-3.txt', header=True)
