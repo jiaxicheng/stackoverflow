@@ -1,0 +1,159 @@
+    https://stackoverflow.com/questions/57420488/how-to-read-in-and-concatenate-a-large-number-of-csvs-with-different-columns-usi#57420488
+
+Method-1: use wholeTextFiles() and specify number of partitions (based on number of cores and total number of files)
+Note: only good for small and especially when number of files is too many. 
+
+    rdd1 = sc.wholeTextFiles('file:///home/hdfs/test/pyspark/union-4-*',10)
+
+    def setdata1(x, flag=0):
+        '''x is the paired RDD element in which x[1] is the data we need to parse
+           flag=0 will process data regularly (default)
+           flag=1 will export only headers
+        '''
+        R = []; cols = []
+        for row in x[1].split('\n'):
+            if not row: continue
+            r = row.split(',')
+            if r[0] == 'id': 
+                cols = r
+                if flag == 1: return cols
+            else: R.append(Row(**dict(zip(cols,r))))
+        return R
+
+    >>> rdd1.flatMap(setdata1).collect()
+    [Row(a=u'a1', b=u'b1', id=u'0'),
+     Row(a=u'a2', b=u'b2', id=u'1'),
+     Row(a=u'a3', b=u'b3', id=u'2'),
+     Row(b=u'b4', c=u'c1', id=u'0'),
+     Row(b=u'b5', c=u'c2', id=u'1'),
+     Row(b=u'b6', c=u'c3', id=u'2'),
+     Row(d=u'd1', id=u'0'), 
+     Row(d=u'd2', id=u'1'), 
+     Row(d=u'd3', id=u'2')]
+
+    # find all column names:
+    >>> all_cols = rdd1.flatMap(lambda x: setdata1(x, 1)).distinct().collect()
+    [u'b', u'd', u'a', u'c', u'id']
+
+    >>> rdd1.flatMap(setdata1) \
+            .map(lambda x: Row(**dict([ (c,x[c]) if c in x else (c, None) for c in all_cols]))) \
+            .toDF() \
+            .show()
+    +----+----+----+----+---+
+    |   a|   b|   c|   d| id|
+    +----+----+----+----+---+
+    |  a1|  b1|null|null|  0|
+    |  a2|  b2|null|null|  1|
+    |  a3|  b3|null|null|  2|
+    |null|  b4|  c1|null|  0|
+    |null|  b5|  c2|null|  1|
+    |null|  b6|  c3|null|  2|
+    |null|null|null|  d1|  0|
+    |null|null|null|  d2|  1|
+    |null|null|null|  d3|  2|
+    +----+----+----+----+---+
+
+Note: use csv parser to process CSV files:
+
+    from io import StringIO
+    import csv
+
+    def setdata2(x, flag=0):
+        R = []; col_names = []
+        # set up the CSV reader
+        reader = csv.reader(StringIO(x[1]))
+        for row in reader:
+            # skip empty rows
+            if not row[0]: continue
+
+            """get col_names from the first line of file
+               for the rest of lines, set up Row object 
+               using col_names as keys for each corresponding 
+               CSV fields
+            """
+            if reader.line_num == 1: 
+                if flag: return row
+                col_names = row
+            else: R.append(Row(**dict(zip(col_names,row))))
+        # return the list of Row objects
+        return R
+
+    >>> rdd1.flatMap(setdata2).collect()
+    [Row(a='a1', b='b1', id='0'),
+     Row(a='a2', b='b2', id='1'),
+     Row(a='a3', b='b3', id='2'),
+     Row(b='b4', c='c1', id='0'),
+     Row(b='b5', c='c2', id='1'),
+     Row(b='b6', c='c3', id='2'),
+     Row(d='d1', id='0'),
+     Row(d='d2', id='1'),
+     Row(d='d3', id='2')]
+
+
+Method-2: use textFile() and mapPartition()
+Note: this will not work if you manually repartitioned the data or some of the files are so huge that 
+      they are on multiple partitions. 
+WARN: do NOT use this method since the partitions are non-deterministic for arbitrary data files
+
+1. read all files into one RDD, each file should be on its own partition
+
+    rdd1 = sc.textFile('file:///home/hdfs/test/pyspark/union-4-*')
+    
+    >>> rdd1.glom().collect()
+    Out[265]: 
+    [[u'id,a,b', u'0,a1,b1', u'1,a2,b2', u'2,a3,b3'],
+     [u'id,b,c', u'0,b4,c1', u'1,b5,c2', u'2,b6,c3'],
+     [u'id,d', u'0,d1', u'1,d2', u'2,d3']]
+    
+2. set up the function to process each partition/file
+
+    def setdata(x):
+        R = []; cols = []
+        for row in x:
+            r = row.split(',')
+            if r[0] == 'id': cols = r
+            else: R.append(Row(**dict(zip(cols,r))))
+        return R
+    
+3. run mapPartition function:
+
+    >>> rdd1.mapPartitions(setdata).collect()
+    Out[266]: 
+    [Row(a=u'a1', b=u'b1', id=u'0'),
+     Row(a=u'a2', b=u'b2', id=u'1'),
+     Row(a=u'a3', b=u'b3', id=u'2'),
+     Row(b=u'b4', c=u'c1', id=u'0'),
+     Row(b=u'b5', c=u'c2', id=u'1'),
+     Row(b=u'b6', c=u'c3', id=u'2'),
+     Row(d=u'd1', id=u'0'),
+     Row(d=u'd2', id=u'1'),
+     Row(d=u'd3', id=u'2')]
+    
+
+4. find all distinct column names from the Row objects
+
+    all_cols = rdd1.mapPartitions(setdata).flatMap(lambda x: x.asDict().keys() ).distinct().collect()
+    [u'b', u'd', u'a', u'c', u'id']
+    
+5. create RDD with Row objects containing all columns collected above:
+
+    df = rdd1.mapPartitions(setdata) \
+             .map(lambda x: Row(**dict([ (c,x[c]) if c in x else (c,None) for c in all_cols])) ) \
+             .toDF()
+    
+    >>> df.show()
+    +----+----+----+----+---+
+    |   a|   b|   c|   d| id|
+    +----+----+----+----+---+
+    |  a1|  b1|null|null|  0|
+    |  a2|  b2|null|null|  1|
+    |  a3|  b3|null|null|  2|
+    |null|  b4|  c1|null|  0|
+    |null|  b5|  c2|null|  1|
+    |null|  b6|  c3|null|  2|
+    |null|null|null|  d1|  0|
+    |null|null|null|  d2|  1|
+    |null|null|null|  d3|  2|
+    +----+----+----+----+---+
+    
+
