@@ -1,0 +1,213 @@
+https://stackoverflow.com/questions/57435858/how-do-you-create-merge-asof-functionality-in-pyspark
+
+Similar Pandas merge_asof() with pyspark:
+Note: The below should be working with the Dataframes matching the following conditions: 
+(1) dfA is huge and contain many columns, at least one of the column can be used as partitioner
+(2) dfB is manageable (not very huge)
+This is not exactly the same question as OP, but is interesting to discuss. the OP's question will be
+checked in the next post.
+
+Example Setup:
+
+    from pyspark.sql.functions import col, lit, when, first, last, coalesce, datediff, expr
+
+    dfA.show()
+    +---+----------+---+----+----+
+    | ID|      date| c1|  c2|  c3|
+    +---+----------+---+----+----+
+    | 12|2019-01-02| A1|   1|   0|
+    | 12|2019-01-05| A2|   2|   1|
+    | 12|2019-01-08| A3|   3|   1|
+    | 12|2019-01-10| A4|null|   1|
+    | 12|2019-01-02| A5|   5|   0|
+    | 25|2019-01-03| B1|  11|null|
+    | 25|2019-01-06| B2|  12|   0|
+    | 25|2019-01-07| B3|  13|   1|
+    | 25|2019-01-09| B4|null|   0|
+    +---+----------+---+----+----+
+    
+    dfB.show()
+    +----------+-----+
+    |      date|count|
+    +----------+-----+
+    |2019-01-03|   10|
+    |2019-01-07|    3|
+    |2019-02-01|    5|
+    +----------+-----+
+    
+(1) Add two columns in dfA: 
+   + `f` to flag the data origin (f==1 from dfA, f==0 from dfB)
+     since merge_asof is basically left-join, we will finally filter out 
+     the result by the flag `f == 1`
+     This flag `f` is also important for sorting in WindowSpec when there might be ties after union DFs
+   + `count` to be filled by dfB.count, set to None as of now
+
+    dfA_new = dfA.withColumn('f', lit(1)).withColumn('count', lit(None))
+    
+    dfA_new.show()
+    +---+----------+---+----+----+---+-----+
+    | ID|      date| c1|  c2|  c3|  f|count|
+    +---+----------+---+----+----+---+-----+
+    | 12|2019-01-02| A1|   1|   0|  1| null|
+    | 12|2019-01-05| A2|   2|   1|  1| null|
+    | 12|2019-01-08| A3|   3|   1|  1| null|
+    | 12|2019-01-10| A4|null|   1|  1| null|
+    | 12|2019-01-02| A5|   5|   0|  1| null|
+    | 25|2019-01-03| B1|  11|null|  1| null|
+    | 25|2019-01-06| B2|  12|   0|  1| null|
+    | 25|2019-01-07| B3|  13|   1|  1| null|
+    | 25|2019-01-09| B4|null|   0|  1| null|
+    +---+----------+---+----+----+---+-----+
+
+(2) Find a partition column from dfA (for example `ID` column)
+    partition is important so that the data don't have to be processed in one partition
+    when using Window function
+    
+    find all unique `ID` and crossJoin with dfB and add all columns in dfA 
+    set f = 0, so we know these records are from dfB after union
+
+    dfB_new = dfA.select('ID') \
+                 .distinct() \
+                 .crossJoin(dfB) \
+                 .withColumn('f', lit(0))
+
+    dfB_new = dfB_new.select([ c if c in dfB_new.columns else lit(None).alias(c) for c in dfA_new.columns])
+    +---+----------+----+----+----+---+-----+
+    | ID|      date|  c1|  c2|  c3|  f|count|
+    +---+----------+----+----+----+---+-----+
+    | 25|2019-01-03|null|null|null|  0|   10|
+    | 25|2019-01-07|null|null|null|  0|    3|
+    | 25|2019-02-01|null|null|null|  0|    5|
+    | 12|2019-01-03|null|null|null|  0|   10|
+    | 12|2019-01-07|null|null|null|  0|    3|
+    | 12|2019-02-01|null|null|null|  0|    5|
+    +---+----------+----+----+----+---+-----+
+
+
+(1) merge_asof: direction = forward
+'''Union dfA_new and dfB_new, set the WindowSpec w2 so we can find the next isNotNull count
+in the same partition order by date and f(descdending order) 
+'''
+
+
+    # bfill (merge_asof direction=forward) in case of tie, put dfA first
+    w2 = Window.partitionBy('ID').orderBy('date', col('f').desc()).rowsBetween(0,Window.unboundedFollowing)
+
+    dfA_F = dfA_new.union(dfB_new)\
+                   .withColumn('count', coalesce(col('count'), first('count', ignorenulls=True).over(w2))) \
+                   .filter('f==1') \
+                   .drop('f')
+
+    dfA_F.orderBy('date').show()
+    +---+----------+---+----+----+-----+                                            
+    | ID|      date| c1|  c2|  c3|count|
+    +---+----------+---+----+----+-----+
+    | 12|2019-01-02| A1|   1|   0|   10|
+    | 12|2019-01-02| A5|   5|   0|   10|
+    | 25|2019-01-03| B1|  11|null|   10|
+    | 12|2019-01-05| A2|   2|   1|    3|
+    | 25|2019-01-06| B2|  12|   0|    3|
+    | 25|2019-01-07| B3|  13|   1|    3|
+    | 12|2019-01-08| A3|   3|   1|    5|
+    | 25|2019-01-09| B4|null|   0|    5|
+    | 12|2019-01-10| A4|null|   1|    5|
+    +---+----------+---+----+----+-----+
+
+
+(2) pd.merge_asof(dfA.sort_values(['date']), dfB.sort_values('date'), on=['date'], by='ID', direction='backward')
+ <-- in Question
+
+    # ffill (merge_asof direction=backward) in case of tie, put dfB_new first
+    w1 = Window.partitionBy('ID').orderBy('date', 'f').rowsBetween(Window.unboundedPreceding,0)
+
+    dfA_B = dfA_new.union(dfB_new)\
+                   .withColumn('count', coalesce(col('count'), last('count', ignorenulls=True).over(w1))) \
+                   .filter('f==1') \
+                   .drop('f')
+
+    dfA_B.orderBy('date').show()
+    +---+----------+---+----+----+-----+                                            
+    | ID|      date| c1|  c2|  c3|count|
+    +---+----------+---+----+----+-----+
+    | 12|2019-01-02| A1|   1|   0| null|
+    | 12|2019-01-02| A5|   5|   0| null|
+    | 25|2019-01-03| B1|  11|null| null|
+    | 12|2019-01-05| A2|   2|   1|   10|
+    | 25|2019-01-06| B2|  12|   0|   10|
+    | 25|2019-01-07| B3|  13|   1|    3|
+    | 12|2019-01-08| A3|   3|   1|    3|
+    | 25|2019-01-09| B4|null|   0|    3|
+    | 12|2019-01-10| A4|null|   1|    3|
+    +---+----------+---+----+----+-----+
+    
+
+(3) merge_asof: direction = 'nearest'
+ ```
+    Fields:
+     + date1     : a temporary column with values only when count is NotNull
+     + prev_date : the date when the previou count is not NULL in the same partition
+     + next_date : the date when the next count is not NULL in the same partition
+     + prev_count: the previous notNULL count order by date within the same partition
+     + next_count: the next notNULL count order by date within the same partition
+     + count     : new count based on the datediff between date and the prev_date/next_date
+     + f         : flag for data origin and used in orderBy of WindowSpec for tie break
+
+    dfA_N = dfA_new.union(dfB_new) \
+                   .withColumn('date1', when(col('count').isNotNull(), col('date'))) \
+                   .withColumn('prev_date', last('date1',True).over(w1)) \
+                   .withColumn('next_date', first('date1',True).over(w2)) \
+                   .withColumn('prev_count', last('count',True).over(w1)) \
+                   .withColumn('next_count', first('count',True).over(w2)) \
+                   .withColumn('count', coalesce(col('count')
+                         , when(datediff(col('date'),col('prev_date')) <= datediff(col('next_date'),col('date'))
+                             , col('prev_count')
+                           ).otherwise(col('next_count')))) \
+                   .filter('f=1') \
+                   .drop('date1', 'prev_date', 'next_date', 'prev_count', 'next_count', 'f')
+
+
+    dfA_N.orderBy('date').show()
+    +---+----------+---+----+----+-----+                                            
+    | ID|      date| c1|  c2|  c3|count|
+    +---+----------+---+----+----+-----+
+    | 12|2019-01-02| A1|   1|   0|   10|
+    | 12|2019-01-02| A5|   5|   0|   10|
+    | 25|2019-01-03| B1|  11|null|   10|
+    | 12|2019-01-05| A2|   2|   1|   10|
+    | 25|2019-01-06| B2|  12|   0|    3|
+    | 25|2019-01-07| B3|  13|   1|    3|
+    | 12|2019-01-08| A3|   3|   1|    3|
+    | 25|2019-01-09| B4|null|   0|    3|
+    | 12|2019-01-10| A4|null|   1|    3|
+    +---+----------+---+----+----+-----+
+
+Note:
+1. For (3) direction=nearest, the count can be calculated with SparkSQL using expr(stmt_count)
+
+    stmt_count = 'coalesce(count, IF(datediff(date,prev_date) <= datediff(next_date,date), prev_count, next_count))'
+
+Note: sample date on madison:
+dfA = spark.read.csv('file:///home/hdfs/test/pyspark/merge_asof_A.txt', header=True)
+dfB = spark.read.csv('file:///home/hdfs/test/pyspark/merge_asof_B.txt', header=True)
+
+Further questions: When there are duplicate on dfB, merge_asof(Pandas) will take only one match
+, adjusted the dfB to the following (there are 3 entries for date = '2019-01-03') and the results 
+match with the corresponding ones in Pandas.merge_asof:
+    +----------+-----+
+    |      date|count|
+    +----------+-----+
+    |2019-01-03|    6|
+    |2019-01-03|   10|
+    |2019-01-07|    3|
+    |2019-02-01|    5|
+    |2019-01-03|    8|
+    +----------+-----+
+ + forward: take the first matches
+ + backword: take the last matches
+ + nearest: take the first if less then matched value and last if greater than the matched value
+Note: however, the order with pyspark is in dfB for the same date might be not enough. another reference 
+field might be required to keep a consistent result.
+
+Note: this method is good for when dfA contains more columns and can find a partitioner to split the huge data.
+if the huge data is on dfB, this might not be an efficient method. considering the Window funciton without
+partitonBy() on huge data, this could be an issue.
