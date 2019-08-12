@@ -76,3 +76,16 @@ to
     (y,x) -> int(y+z)
 
 
+Another example with aggregate:
+REF:https://stackoverflow.com/questions/47839077/pyspark-best-way-to-sum-values-in-column-of-type-arrayinteger
+
+    df = spark.createDataFrame([('Dan', [10,5,2,12]), ('Ann', [12,3,5]), ('Jon', [])], ['name', 'scores'])
+
+    df.withColumn('Total', F.expr('''aggregate(scores, 0, (x,y) -> int(x+y))''')).show()
+    +----+--------------+-----+
+    |name|        scores|Total|
+    +----+--------------+-----+
+    | Dan|[10, 5, 2, 12]|   29|
+    | Ann|    [12, 3, 5]|   20|
+    | Jon|            []|    0|
+    +----+--------------+-----+
