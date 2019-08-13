@@ -28,6 +28,8 @@ Data Setup
     # columns that involved in colList    
     cols = df.columns[1:5]
     
+Method-1: use Spark SQL CASE/WHEN
+
 Set up the SQL statement
 ------------------------
 SQL statement to map column names in colList into the corresponding column fields
@@ -92,4 +94,32 @@ Some notes:
     + CONCAT(x, '') == 'col1'    <-- works
 
   + col1 as String or Fieldname, use the WHEN/CASE statement to do the mapping
+
+###############################
+Method-2: use mapping and transform (Only for spark 2.4+)
+    
+    """
+       map_cols  : create mapping from column-name -> column-index
+       arr       : combine all related columns into an array
+       list_vals : use transform() to convert array of column names to their corresponding values
+    """
+    df.withColumn('map_cols', F.map_from_arrays(
+             F.array(*[F.lit(c) for c in cols])
+           , F.sequence(F.lit(0), F.lit(len(cols)-1))
+       )) \
+      .withColumn('arr', F.array(cols)) \
+      .withColumn('list_vals', F.expr('transform(colList, c -> arr[map_cols[c]])')) \
+      .drop('map_cols', 'arr') \
+      .show()
+    +----+----+----+----+----+------------+---------+
+    |col1|col2|col3|col4|col5|     colList|list_vals|
+    +----+----+----+----+----+------------+---------+
+    |   1|   2|   0|   3|   4|[col1, col2]|   [1, 2]|
+    |   1|   2|   0|   3|   4|[col2, col3]|   [2, 0]|
+    |   1|   2|   0|   3|   4|[col1, col3]|   [1, 0]|
+    |   1|   2|   0|   3|   4|[col3, col4]|   [0, 3]|
+    |   1|   2|   0|   3|   4|[col2, col5]|   [2, 4]|
+    |   1|   2|   0|   3|   4|[col4, col5]|   [3, 4]|
+    +----+----+----+----+----+------------+---------+
+
 
