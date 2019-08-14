@@ -1,0 +1,96 @@
+https://stackoverflow.com/questions/57415635/concatenate-string-using-pyspark-loop
+
+file-content:
+---
+XXX,
+YYY,123.67789
+
+,
+
+X1X1X1,
+
+Y1Y1Y1,123.64447789
+
+Y2Y2Y2,123.64447789
+,
+
+X3X3X3,
+
+Y4Y4Y4,123.64447789
+
+Y5Y5Y5,123.64447789
+
+Y6Y6Y6,143.64447789
+---END of file---
+
+# define the function to clean text
+# this can be used for both methods listed below
+def clean_csv(x):
+    R = []; f1 = ''
+    try:
+        for row in x[1].split('\n'):
+            if row.endswith(','): 
+                f1 = row
+            elif ',' in row:
+                R.append(f1 + row)
+    except:
+        pass
+    return R
+
+def clean_csv(x):
+    try:
+        R = []; 
+        for row in x[1].split('\n'):
+            if row.endswith(','): 
+                f1 = row
+            elif ',' in row:
+                R.append(f1 + row)
+        return R
+    except:
+        return []
+
+Method-1: newAPIHadoopFile()
+REF: https://stackoverflow.com/questions/31227363/creating-spark-data-structure-from-multiline-record
+
+>>> rdd1 = spark.sparkContext.newAPIHadoopFile(
+    'file:///home/hdfs/test/pyspark/csv-3.txt', 
+    'org.apache.hadoop.mapreduce.lib.input.TextInputFormat',
+    'org.apache.hadoop.io.LongWritable',
+    'org.apache.hadoop.io.Text', 
+    conf={'textinputformat.record.delimiter': '\n,\n'}
+)
+
+>>> rdd1.collect()
+[(0, u'XXX,\nYYY,123.67789\n'),
+ (22, u'\nX1X1X1,\n\nY1Y1Y1,123.64447789\n\nY2Y2Y2,123.64447789'),
+ (75, u'\nX3X3X3,\n\nY4Y4Y4,123.64447789\n\nY5Y5Y5,123.64447789\n\nY6Y6Y6,143.64447789\n')]
+
+
+>>> rdd1.flatMap(clean_csv).collect()
+Out[368]: 
+[u'XXX,YYY,123.67789',
+ u'X1X1X1,Y1Y1Y1,123.64447789',
+ u'X1X1X1,Y2Y2Y2,123.64447789',
+ u'X3X3X3,Y4Y4Y4,123.64447789',
+ u'X3X3X3,Y5Y5Y5,123.64447789',
+ u'X3X3X3,Y6Y6Y6,143.64447789']
+
+
+Method-2: wholeTextFile()
+#Only fine if the filee are not huge and can be loaded in the same partition easily
+
+>>> rdd2 = sc.wholeTextFiles('file:///home/hdfs/test/pyspark/csv-3.txt')
+
+>>> rdd2.collect()
+u'file:/home/hdfs/test/pyspark/csv-3.txt',
+  u'XXX,\nYYY,123.67789\n\n,\n\nX1X1X1,\n\nY1Y1Y1,123.64447789\n\nY2Y2Y2,123.64447789\n,\n\nX3X3X3,\n\nY4Y4Y4,123.64447789\n\nY5Y5Y5,123.64447789\n\nY6Y6Y6,143.64447789\n'
+
+>>> rdd2.flatMap(clean_csv).collect()
+[u'XXX,YYY,123.67789',
+ u'X1X1X1,Y1Y1Y1,123.64447789',
+ u'X1X1X1,Y2Y2Y2,123.64447789',
+ u'X3X3X3,Y4Y4Y4,123.64447789',
+ u'X3X3X3,Y5Y5Y5,123.64447789',
+ u'X3X3X3,Y6Y6Y6,143.64447789']
+
+
