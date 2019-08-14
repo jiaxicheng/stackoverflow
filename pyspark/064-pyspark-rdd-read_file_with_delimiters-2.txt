@@ -1,0 +1,81 @@
+https://stackoverflow.com/questions/57499828/how-to-match-extract-multi-line-pattern-from-file-in-pysark
+
+Use newAPIHadoopFile
+http://spark.apache.org/docs/2.4.0/api/python/pyspark.html#pyspark.SparkContext.newAPIHadoopFile
+
+* Read the inpur data in paragraph-mode so that all related lines are read int he same RDD element.
+
+(1) Data Set up:
+
+Sample data: '''
+<Q31> <prop/P1082> <Pointer_Q31-87RF> .
+<Pointer_Q31-87RF> <rank> <BestRank> .
+<Pointer_Q31-87RF> <prop/Pointer_P1082> "+24954"^^<2001/XMLSchema#decimal> .
+<Pointer_Q31-87RF> <prop/Pointer_value/P1082> <value/cebcf9> .
+<value/cebcf9> <syntax-ns#type> <QuantityValue> .
+<value/cebcf9> <quantityAmount> 24954
+<value/cebcf9> <quantityUnit> <Meter> .
+
+<Q25> <prop/P1082> <Pointer_Q25-8E6C> .
+<Pointer_Q25-8E6C> <rank> <NormalRank> .
+<Pointer_Q25-8E6C> <prop/Pointer_P1082> "+24954"
+<Pointer_Q25-8E6C> <prop/Pointer_value/P1082> <value/cebcf9> .
+<value/cebcf9> <syntax-ns#type> <QuantityValue> .
+<value/cebcf9> <quantityAmount> "582" .
+<value/cebcf9> <quantityUnit> <Kilometer> .
+'''
+
+(2) Python function to parse data.
+
+    from pyspark.sql import Row
+    import re
+
+    cols = ['Item_Id', 'quantityAmount', 'quantityUnit=', 'rank']
+
+    def parse_data(x, cols):
+        try: 
+            row = {}
+            for e in x.split('\n'):
+                y = e.split('> <')
+                if len(y) < 2: 
+                    continue
+                if y[0].startswith('<Q'): 
+                    row['Item_Id'] = y[0][1:]
+                elif y[1] in ['rank', 'quantityUnit']:
+                    row[y[1]] = y[2].rstrip("> .")
+                else:
+                    m = re.match(r'^quantityAmount>\D*(\d+)', y[1])
+                    if m: row['quantityAmount'] = m.group(1)
+            # if row is not EMPTY, set None to missing field
+            return Row(**dict([ (k, row[k]) if k in row else (k, None) for k in cols])) if row else None
+        except:
+            return None
+    
+(3) Read the data with newAPIHadoopFile()  
+  
+    rdd = spark.sparkContext.newAPIHadoopFile(
+        'file:///home/hdfs/test/pyspark/delimiter-2.txt',
+        'org.apache.hadoop.mapreduce.lib.input.TextInputFormat',
+        'org.apache.hadoop.io.LongWritable',
+        'org.apache.hadoop.io.Text',
+        conf={'textinputformat.record.delimiter': '\n\n'}
+    )
+    
+(4) use map() function to process the RDD element x[1] into Row object 
+    and use filter() to skip element w/o a match.
+
+    rdd.map(lambda x: parse_data(x[1])).collect()
+    [Row(Item_Id=u'Q31', quantityAmount=u'24954', quantityUnit=u'Meter', rank=u'BestRank'),
+     Row(Item_Id=u'Q25', quantityAmount=u'582', quantityUnit=u'Kilometer', rank=u'NormalRank')]
+
+(5) convert the RDD into dataframe: 
+
+    df = rdd.map(lambda x: parse_data(x[1])).filter(bool).toDF()
+    df.show()
+    +-------+--------------+------------+----------+
+    |Item_Id|quantityAmount|quantityUnit|      rank|
+    +-------+--------------+------------+----------+
+    |    Q31|         24954|       Meter|  BestRank|
+    |    Q25|           582|   Kilometer|NormalRank|
+    +-------+--------------+------------+----------+
+    
