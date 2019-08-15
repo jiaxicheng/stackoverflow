@@ -1,0 +1,116 @@
+https://stackoverflow.com/questions/57500713/xml-parsing-on-spark-structured-streaming
+
+SparkSQL XML related functions:
+https://spark.apache.org/docs/2.4.0/api/sql/index.html#xpath
+** available at least from Spark 2.3.0 **
+
+Use XPATH to parse XML data field:
+
+
+For the following XML text:
+
+x1 = r'''<root>
+    <users>
+        <user>
+              <account>1234</account>
+              <name>name_1</name>
+              <number>34233</number>
+         </user>
+         <user>
+              <account>58789</account>
+              <name>name_2</name>
+              <number>54697</number>
+         </user>    
+    </users>
+</root>'''
+
+df = spark.createDataFrame([(x1,)],['xml_data'])
+
+(1) retrieve a list of elements:
+# retrieve all into an array of strings
+df.selectExpr("xpath(xml_data, '//number/text()') AS all_numbers").show()
++--------------+
+|   all_numbers|
++--------------+
+|[34233, 54697]|
++--------------+
+
+df.selectExpr("""xpath(xml_data, '//user//text()')""").show(truncate=False)
++----------------------------------+
+|xpath(xml_data, //user//text())   |
++----------------------------------+
+|[
+              , 1234, 
+              , name_1, 
+              , 34233, 
+         , 
+              , 58789, 
+              , name_2, 
+              , 54697, 
+         ]|
++----------------------------------+
+
+
+(2) aggregations:
+# retrieve sum of number for all account with at least 5 digit
+df.selectExpr("xpath_double(xml_data, 'sum(//user[account>=10000]/number)') AS sum_account_ge_10000").show()
++--------------------+
+|sum_account_ge_10000|
++--------------------+
+|             54697.0|
++--------------------+
+
+
+# sum of account + sum of number
+df.selectExpr("xpath_double(xml_data, 'sum(//number|//account)') AS sum_two_elements").show()
++----------------+
+|sum_two_elements|
++----------------+
+|        148953.0|
++----------------+
+
+# calculate average of numbers
+df.selectExpr("""xpath_double(xml_data, 'sum(//number) div count(//number)') as number_avg""").show()
++----------+
+|number_avg|
++----------+
+|   44465.0|
++----------+
+
+(3) String operations:
+
+# translate()
+df.selectExpr("""xpath_string(xml_data, 'translate(//name, "abc", "ABC")')""").show()
++-------------------------------------------------------+
+|xpath_string(xml_data, translate(//name, "abc", "ABC"))|
++-------------------------------------------------------+
+|                                                 nAme_1|
++-------------------------------------------------------+
+
+# concat()
+df.selectExpr("""xpath_string(xml_data, 'concat(//user[2]/name, //user[2]/account)') as user2_account""").show()
++-------------+
+|user2_account|
++-------------+
+|  name_258789|
++-------------+
+
+* Available XPath functions:
+  https://developer.mozilla.org/en-US/docs/Web/XPath/Functions
+  (1) sum()
+  (2) count()
+  (3) ceiling() / floor()
+  (4) round()
+  (5) contains(), concat(), translate(), substring()
+
+
+Reference to XPath operators:
+https://www.w3schools.com/xml/xpath_operators.asp
+https://developer.mozilla.org/en-US/docs/Web/XPath/Functions
++ node(), text()
+https://www.w3schools.com/xml/xpath_axes.asp
+
+Other XML related topics with Spark
+https://stackoverflow.com/questions/33078221/xml-processing-in-spark
+
+
