@@ -1,0 +1,142 @@
+
+https://stackoverflow.com/questions/57525149/spark-how-to-aggregate-reduce-records-based-on-time-difference
+
+For Pandas users, there is pretty much a common programming pattern using shift() + cumsum() 
+to setup a group-label to identify consecutive rows matching a specific pattern/conditions. With pyspark,
+we can use Window functions lag() + sum() to do the same:
+
+Data Setup:
+
+    df.orderBy('timestamp').show()
+    +-------+----------+-----+
+    |trip-id| timestamp|speed|
+    +-------+----------+-----+
+    |    001|1538204192|44.55|
+    |    001|1538204193|47.20|
+    |    001|1538204194|42.14|
+    |    001|1538204195|39.20|
+    |    001|1538204196|35.30|
+    |    001|1538204197|32.22|
+    |    001|1538204198|34.80|
+    |    001|1538204199|37.10|
+    |    001|1538204221|55.30|
+    |    001|1538204222|57.20|
+    |    001|1538204223|54.60|
+    |    001|1538204224|52.15|
+    |    001|1538204225|49.27|
+    |    001|1538204226|47.89|
+    |    001|1538204227|50.57|
+    |    001|1538204228|53.72|
+    +-------+----------+-----+
+
+    >>> df.printSchema()
+    root
+     |-- trip-id: string (nullable = true)
+     |-- unix_timestamp: integer (nullable = true)
+     |-- speed: double (nullable = true)
+
+
+Set up Window Spec (w1, w2):
+
+    # Window spec used to find previous speed  F.lag('speed').over(w1) and also do the cumsum() to find flag `d2`
+    w1 = Window.partitionBy('trip-id').orderBy('timestamp')
+
+    # Window spec used to find the minimal speed over the partition(`trip-id`,`d2`)
+    w2 = Window.partitionBy('trip-id', 'd2').rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+
+Three flags (d1, d2, d3):
+
+ + d1 : flag to identify if the previous speed is greater than the current speed, if true d1 = 0, else d1 = 1
+ + d2 : flag to mark the consecutive rows for speed-drop as the same unique number
+ + d3 : flag to identify the minimal value of d1 on the partition('trip-id', 'd2'), 
+        only when `d3 == 0` can the groups have speed drop. this will be used to filter out unrelated rows
+
+    df_1 = df.withColumn('d1', F.when(F.lag('speed').over(w1) > F.col('speed'), 0).otherwise(1))\
+             .withColumn('d2', F.sum('d1').over(w1)) \
+             .withColumn('d3', F.min('d1').over(w2)) 
+
+    df_1.show()
+    +-------+----------+-----+---+---+---+                                          
+    |trip-id| timestamp|speed| d1| d2| d3|
+    +-------+----------+-----+---+---+---+
+    |    001|1538204192|44.55|  1|  1|  1|
+    |    001|1538204193|47.20|  1|  2|  0|
+    |    001|1538204194|42.14|  0|  2|  0|
+    |    001|1538204195|39.20|  0|  2|  0|
+    |    001|1538204196|35.30|  0|  2|  0|
+    |    001|1538204197|32.22|  0|  2|  0|
+    |    001|1538204198|34.80|  1|  3|  1|
+    |    001|1538204199|37.10|  1|  4|  1|
+    |    001|1538204221|55.30|  1|  5|  1|
+    |    001|1538204222|57.20|  1|  6|  0|
+    |    001|1538204223|54.60|  0|  6|  0|
+    |    001|1538204224|52.15|  0|  6|  0|
+    |    001|1538204225|49.27|  0|  6|  0|
+    |    001|1538204226|47.89|  0|  6|  0|
+    |    001|1538204227|50.57|  1|  7|  1|
+    |    001|1538204228|53.72|  1|  8|  1|
+    +-------+----------+-----+---+---+---+
+
+
+Remove rows which are not with concern:
+
+    df_1 = df_1.where('d3 == 0')
+
+    df_1.show()
+    +-------+----------+-----+---+---+---+                                          
+    |trip-id| timestamp|speed| d1| d2| d3|
+    +-------+----------+-----+---+---+---+
+    |    001|1538204193|47.20|  1|  2|  0|
+    |    001|1538204194|42.14|  0|  2|  0|
+    |    001|1538204195|39.20|  0|  2|  0|
+    |    001|1538204196|35.30|  0|  2|  0|
+    |    001|1538204197|32.22|  0|  2|  0|
+    |    001|1538204222|57.20|  1|  6|  0|
+    |    001|1538204223|54.60|  0|  6|  0|
+    |    001|1538204224|52.15|  0|  6|  0|
+    |    001|1538204225|49.27|  0|  6|  0|
+    |    001|1538204226|47.89|  0|  6|  0|
+    +-------+----------+-----+---+---+---+
+
+Now for df_1, group by `trip-id` and `d2`, find the min and max of `F.struct('timestamp', 'speed')`
+this will return the first and last records in the group, select the corresponding fields from 
+the `struct` to get the final result:
+
+    df_new = df_1.groupby('trip-id', 'd2').agg(
+              F.min(F.struct('timestamp', 'speed')).alias('start')
+            , F.max(F.struct('timestamp', 'speed')).alias('end')
+    ).select(
+          'trip-id'
+        , F.col('start.timestamp').alias('start timestamp')
+        , F.col('end.timestamp').alias('end timestamp')
+        , F.col('start.speed').alias('start speed')
+        , F.col('end.speed').alias('end speed')
+    )
+
+    df_new.show()
+    +-------+---------------+-------------+-----------+---------+                   
+    |trip-id|start timestamp|end timestamp|start speed|end speed|
+    +-------+---------------+-------------+-----------+---------+
+    |    001|     1538204193|   1538204197|      47.20|    32.22|
+    |    001|     1538204222|   1538204226|      57.20|    47.89|
+    +-------+---------------+-------------+-----------+---------+
+
+Remove the intermediate dataframe df_1, we have the following:
+
+    df_new = df.withColumn('d1', F.when(F.lag('speed').over(w1) > F.col('speed'), 0).otherwise(1))\
+             .withColumn('d2', F.sum('d1').over(w1)) \
+             .withColumn('d3', F.min('d1').over(w2)) \
+             .where('d3 == 0') \
+             .groupby('trip-id', 'd2').agg(
+                  F.min(F.struct('timestamp', 'speed')).alias('start')
+                , F.max(F.struct('timestamp', 'speed')).alias('end')
+              )\
+             .select(
+                  'trip-id'
+                , F.col('start.timestamp').alias('start timestamp')
+                , F.col('end.timestamp').alias('end timestamp')
+                , F.col('start.speed').alias('start speed')
+                , F.col('end.speed').alias('end speed')
+              )
+
+
