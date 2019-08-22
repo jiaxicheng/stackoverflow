@@ -1,0 +1,33 @@
+Examples on date manipulations:
+
+Example-1: from year, month and week-number to retrieve a "Friday"(or any dayofweek)
+https://stackoverflow.com/questions/57463921/how-to-truncate-a-date-to-friday-based-on-week-of-month
+
+(1) Use to_date to create a date column `dt` point to the first date in the month specified
+(2) find the week number `wn`, convert it to integer and minus 1 to point it to the previous week
+(3) use date_add function to find the Monday after `wn` week from dt `date_add(dt, 7*wn-dayofweek(dt))`
+(4) use next_day(.., "Friday") to find the next Friday
+
+    df_new = df.withColumn('dt', F.to_date(F.concat_ws('-', 'Year','Month',F.lit('01')), format="yyyy-MMMM-dd")) \
+               .withColumn('wn', F.split('Weeks', ' ')[0].astype('int')-1) \
+               .withColumn('ldate', F.expr('next_day(date_add(dt, 7*wn-dayofweek(dt)),"Friday")'))
+
+    df_new.show()
+    +----+-----+-----+----------+----------+---+----------+
+    |Year|Month|Weeks|      date|        dt| wn|     ldate|
+    +----+-----+-----+----------+----------+---+----------+
+    |2018|April| 01 W|2018-04-06|2018-04-02|  0|2018-04-06|
+    |2018|April| 02 W|2018-04-13|2018-04-02|  1|2018-04-13|
+    |2018|April| 03 W|2018-04-20|2018-04-02|  2|2018-04-20|
+    |2018|April| 04 W|2018-04-27|2018-04-02|  3|2018-04-27|
+    |2018|  May| 01 W|2018-05-04|2018-05-02|  0|2018-05-04|
+    |2018|  May| 02 W|2018-05-11|2018-05-02|  1|2018-05-11|
+    |2018|  May| 03 W|2018-05-18|2018-05-02|  2|2018-05-18|
+    |2018|  May| 04 W|2018-05-25|2018-05-02|  3|2018-05-25|
+    |2018| June| 01 W|2018-06-01|2018-06-02|  0|2018-06-01|
+    +----+-----+-----+----------+----------+---+----------+
+
+Example on disk: 
+    df = spark.read.csv('file:///home/hdfs/test/pyspark/datetime-3.txt', header=True)
+
+
