@@ -1,0 +1,153 @@
+https://stackoverflow.com/questions/57525475/how-to-apply-complex-udaf-to-a-dataframe
+
+resample(reindex) fill missing dates and forward-filling the value field
+
+    df = spark.read.csv('file:///home/hdfs/test/pyspark/window-9.txt', header=True)
+
+Data Setup
+----------
+
+    df = df.withColumn('time_period', F.to_date('time_period', format='dd-MM-yyyy'))
+
+    >>> df.show()
+    +-------+-----------+-----+
+    |TRADEID|time_period|value|
+    +-------+-----------+-----+
+    |      1| 31-01-2019|    5|
+    |      1| 31-03-2019|    6|
+    |      2| 31-01-2019|   15|
+    |      2| 31-03-2019|   10|
+    |      2| 30-06-2019|   20|
+    +-------+-----------+-----+
+    
+    >>> df.printSchema()
+    root
+     |-- TRADEID: string (nullable = true)
+     |-- time_period: date (nullable = true)
+     |-- value: string (nullable = true)
+
+
+Find `start_date` and `end_date` of each TRADEID
+------------------------------------------------
+
+    df_1 = df.groupby('TRADEID') \
+             .agg(F.min('time_period').alias('start_date'), F.max('time_period').alias('end_date')) \
+             .persist()
+    
+    >>> df_1.show()
+    +-------+----------+----------+                                                 
+    |TRADEID|start_date|  end_date|
+    +-------+----------+----------+
+    |      1|2019-01-31|2019-03-31|
+    |      2|2019-01-31|2019-06-30|
+    +-------+----------+----------+
+
+
+Create Date Sequences
+---------------------
+
+Create Date sequence for each TRADEID based on its start_date and end_date
+
+    Method-1: use Pandas
+    
+    if df_1 is small enough to load into memory, then just use Pandas
+    
+    
+        from pandas import date_range
+    
+        df_dates = spark.createDataFrame([ 
+            (id, d.date()) for id, start_date, end_date in df_1.toPandas().values 
+                           for d in pd.date_range(start_date, end_date, freq='M') 
+            ], ['TRADEID', 'time_period']
+        )
+    
+    
+    Method-2: use sequence() (for Spark 2.4+):
+    
+    Since sequence() with `Interval 1 month` does not hold the month boundary well, so I use `interval 28 day` which can make sure at least one entry for each month. transform these dates with last_day() function and then drop duplicates.
+    
+        df_dates = df_1.selectExpr('TRADEID', 'explode(sequence(start_date, end_date, interval 28 day)) AS time_period') \
+                       .withColumn('time_period', F.last_day('time_period')) \
+                       .drop_duplicates()
+    
+        df_dates.show()
+        +-------+-----------+                                                           
+        |TRADEID|time_period|
+        +-------+-----------+
+        |      1| 2019-01-31|
+        |      1| 2019-02-28|
+        |      1| 2019-03-31|
+        |      2| 2019-01-31|
+        |      2| 2019-02-28|
+        |      2| 2019-03-31|
+        |      2| 2019-04-30|
+        |      2| 2019-05-31|
+        |      2| 2019-06-30|
+        +-------+-----------+
+    
+    Method-3: use udf: 
+    
+    2.1 use pandas.date_range()
+    
+        from pandas import date_range
+    
+        @F.udf("array<date>")
+        def date_seq_1(start_date, end_date):
+            return [ d.date() for d in date_range(start_date, end_date, freq='M') ]
+    
+        df_dates = df_1.select('TRADEID', F.explode(date_seq_1('start_date', 'end_date')).alias('time_period'))
+    
+    
+    2.2 use dateutil.relativedelta 
+    
+        from dateutil.relativedelta import relativedelta
+    
+        @F.udf("array<date>")
+        def date_seq_2(start_date, end_date):
+            d = []
+            e = start_date
+            while e < end_date:
+                d.append(e)
+                e += relativedelta(months=1) 
+            return d
+    
+        df_dates = df_1.withColumn('time_period', F.explode(date_seq_2('start_date', 'end_date'))) \
+                       .select('TRADEID', F.last_day('time_period').alias('time_period')) 
+    
+
+Join data and then fillna
+-------------------------
+
+    df_new = df_dates.join(df, on=['TRADEID', 'time_period'], how='left')
+    +-------+-----------+-----+                                                     
+    |TRADEID|time_period|value|
+    +-------+-----------+-----+
+    |      1| 2019-01-31|    5|
+    |      1| 2019-02-28| null|
+    |      1| 2019-03-31|    6|
+    |      2| 2019-01-31|   15|
+    |      2| 2019-02-28| null|
+    |      2| 2019-03-31|   10|
+    |      2| 2019-04-30| null|
+    |      2| 2019-05-31| null|
+    |      2| 2019-06-30|   20|
+    +-------+-----------+-----+
+    
+    # Window Spec to do forward-filling with the null values
+    w1 = Window.partitionBy('TRADEID').orderBy('time_period').rowsBetween(Window.unboundedPreceding,0)
+    
+    df_new.withColumn('value', F.last('value', True).over(w1)).show()
+    +-------+-----------+-----+                                                     
+    |TRADEID|time_period|value|
+    +-------+-----------+-----+
+    |      1| 2019-01-31|    5|
+    |      1| 2019-02-28|    5|
+    |      1| 2019-03-31|    6|
+    |      2| 2019-01-31|   15|
+    |      2| 2019-02-28|   15|
+    |      2| 2019-03-31|   10|
+    |      2| 2019-04-30|   10|
+    |      2| 2019-05-31|   10|
+    |      2| 2019-06-30|   20|
+    +-------+-----------+-----+
+
