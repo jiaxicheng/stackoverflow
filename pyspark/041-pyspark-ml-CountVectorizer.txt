@@ -88,3 +88,24 @@ Note:
 * CountVectorizer is an Estimator which operates on an array of Strings columns. if you are working on a String column
   try StringIndexer Estimator and `StringIndexerModel.from_labels()` class method.
 
+  >>> from pyspark.ml.feature import StringIndexerModel
+  >>> model = StringIndexerModel.from_labels(drange, inputCol='d1', outputCol='d1_feature')
+  >>> model.transform(df).show()
++---+---+----------+----------+----------+
+|id_|  p|        d1|        d2|d1_feature|
++---+---+----------+----------+----------+
+|  1|  A|2018-09-26|2018-10-26|     103.0|
+|  2|  B|2018-06-21|2018-07-19|       6.0|
+|  2|  B|2018-08-13|2018-10-07|      59.0|
+|  2|  B|2018-12-31|2019-02-27|     199.0|
+|  2|  B|2019-05-28|2019-06-25|     347.0|
+|  3|  C|2018-06-15|2018-07-13|       0.0|
+|  3|  C|2018-08-15|2018-10-09|      61.0|
+|  3|  C|2018-12-03|2019-03-12|     171.0|
+|  3|  C|2019-05-10|2019-06-07|     329.0|
+|  4|  A|2019-01-30|2019-03-01|     229.0|
+|  4|  A|2019-05-30|2019-07-25|     349.0|
+|  5|  C|2018-09-19|2018-10-17|      96.0|
++---+---+----------+----------+----------+
+
+ 
