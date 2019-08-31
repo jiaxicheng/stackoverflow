@@ -1,0 +1,90 @@
+
+https://stackoverflow.com/questions/57070594/make-and-populate-a-pyspark-dataframe-with-columns-as-period-range
+
+The proposed method is slow with huge dataset especially when the date range is big. Below using 
+pyspark.ml.feature.CountVector Estimator to create a column of Sparse vectors which could be help
+if it's for a Machine-Learning task. In the following code, the Sparse vectors will be saved in 
+the `features` column
+
+Set up the data from the original post.
+
+    import pandas as pd
+    from pyspark.sql import functions as F
+    from pyspark.ml.feature import CountVectorizerModel
+
+    #... skip the code to initialize spark and df
+
+    >>> df.show()
+    +---+---+----------+----------+
+    |id_|  p|        d1|        d2|
+    +---+---+----------+----------+
+    |  1|  A|2018-09-26|2018-10-26|
+    |  2|  B|2018-06-21|2018-07-19|
+    |  2|  B|2018-08-13|2018-10-07|
+    |  2|  B|2018-12-31|2019-02-27|
+    |  2|  B|2019-05-28|2019-06-25|
+    |  3|  C|2018-06-15|2018-07-13|
+    |  3|  C|2018-08-15|2018-10-09|
+    |  3|  C|2018-12-03|2019-03-12|
+    |  3|  C|2019-05-10|2019-06-07|
+    |  4|  A|2019-01-30|2019-03-01|
+    |  4|  A|2019-05-30|2019-07-25|
+    |  5|  C|2018-09-19|2018-10-17|
+    +---+---+----------+----------+
+
+    
+    >>> df.printSchema()
+    root
+     |-- id_: string (nullable = true)
+     |-- p: string (nullable = true)
+     |-- d1: string (nullable = true)
+     |-- d2: string (nullable = true)
+
+
+Get min(d1) for `start_date` and max(d2) for `end_date`: 
+
+    d = df.select(F.min('d1').alias('start_date'), F.max('d2').alias('end_date')).first()
+
+    >>> d
+    Row(start_date=u'2018-06-15', end_date=u'2019-07-25')
+
+Get a list of dates and use this list as the vocabulary list for CountVectorizerModel
+
+    drange = [ c.strftime('%Y-%m-%d') for c in pd.period_range(d.start_date, d.end_date, freq='D') ]
+    >>> cols
+    [u'2018-06-15',
+     u'2018-06-16',
+     .....
+     u'2019-07-23',
+     u'2019-07-24',
+     u'2019-07-25']
+
+Set up a CountVectorizerModel using `drange` as the vacabulary list and an array `A1` as input
+, and the result will be saved to `features` column	
+
+    >>> model = CountVectorizerModel.from_vocabulary(drange, inputCol='A1', outputCol='features')
+
+Create a Sparse Vector column to address the data
+
+    >>> model.transform(df.withColumn('A1', F.array('d1', 'd2'))).show()
+
+    +---+---+----------+----------+------------------------+-------------------------+
+    |id_|p  |d1        |d2        |A1                      |features                 |
+    +---+---+----------+----------+------------------------+-------------------------+
+    |1  |A  |2018-09-26|2018-10-26|[2018-09-26, 2018-10-26]|(406,[103,133],[1.0,1.0])|
+    |2  |B  |2018-06-21|2018-07-19|[2018-06-21, 2018-07-19]|(406,[6,34],[1.0,1.0])   |
+    |2  |B  |2018-08-13|2018-10-07|[2018-08-13, 2018-10-07]|(406,[59,114],[1.0,1.0]) |
+    |2  |B  |2018-12-31|2019-02-27|[2018-12-31, 2019-02-27]|(406,[199,257],[1.0,1.0])|
+    |2  |B  |2019-05-28|2019-06-25|[2019-05-28, 2019-06-25]|(406,[347,375],[1.0,1.0])|
+    |3  |C  |2018-06-15|2018-07-13|[2018-06-15, 2018-07-13]|(406,[0,28],[1.0,1.0])   |
+    |3  |C  |2018-08-15|2018-10-09|[2018-08-15, 2018-10-09]|(406,[61,116],[1.0,1.0]) |
+    |3  |C  |2018-12-03|2019-03-12|[2018-12-03, 2019-03-12]|(406,[171,270],[1.0,1.0])|
+    |3  |C  |2019-05-10|2019-06-07|[2019-05-10, 2019-06-07]|(406,[329,357],[1.0,1.0])|
+    |4  |A  |2019-01-30|2019-03-01|[2019-01-30, 2019-03-01]|(406,[229,259],[1.0,1.0])|
+    +---+---+----------+----------+------------------------+-------------------------+
+
+
+Note: 
+* CountVectorizer is an Estimator which operates on an array of Strings columns. if you are working on a String column
+  try StringIndexer Estimator and `StringIndexerModel.from_labels()` class method.
+
