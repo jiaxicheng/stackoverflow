@@ -4,7 +4,11 @@ https://stackoverflow.com/questions/57070594/make-and-populate-a-pyspark-datafra
 The proposed method is slow with huge dataset especially when the date range is big. Below using 
 pyspark.ml.feature.CountVector Estimator to create a column of Sparse vectors which could be help
 if it's for a Machine-Learning task. In the following code, the Sparse vectors will be saved in 
-the `features` column
+the `features` column.
+
+Note: this answer is trying to solve a different problem by keeping start/end range of each row only
+      and save them as sparse vectors. This is useful in the future to convert an pyspark array into
+      Sparse vectors for ML tasks.
 
 Set up the data from the original post.
 
