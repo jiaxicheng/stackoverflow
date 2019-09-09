@@ -1,0 +1,223 @@
+https://stackoverflow.com/questions/57698752/populate-month-wise-dataframe-from-two-date-columns
+
+
+Sample:
+
+    import pandas as pd, numpy as np
+    from pyspark.sql import functions as F    
+
+    df = spark.createDataFrame([
+            (1, 'A', '2018-09-26', '2018-10-26')
+          , (2, 'B', '2016-06-21', '2018-07-19')
+          , (2, 'B', '2018-08-13', '2018-10-07')
+          , (2, 'B', '2018-12-31', '2019-02-27')
+          , (2, 'B', '2019-05-28', '2019-06-25')
+          , (3, 'C', '2018-06-15', '2018-07-13')
+          , (3, 'C', '2018-08-15', '2018-10-09')
+          , (3, 'C', '2016-12-03', '2019-03-12')
+          , (3, 'C', '2019-05-10', '2019-06-07')
+          , (4, 'A', '2019-01-30', '2019-03-01')
+          , (4, 'B', '2019-05-30', '2019-07-25')
+          , (5, 'C', '2018-09-19', '2018-10-17')
+        ], ['id_', 'p', 'd1', 'd2'])
+    
+Find the date ranges and then create a list of all months in between
+
+    d = df.select(F.min('d1').alias('start_date'), F.max('d2').alias('end_date')).first()
+
+    mrange = [ c.strftime("%Y-%m-01") for c in pd.period_range(d.start_date, d.end_date, freq='M') ]
+    ['2018-06-01',
+     '2018-07-01',
+     ....
+     '2019-06-01',
+     '2019-07-01']
+
+set up the Spark SQL snippet to calculate numbers based on month:
+
+    stmt = '''
+        IF(d2 < "{0}" OR d1 > LAST_DAY("{0}")
+         , 0
+         , DATEDIFF(LEAST(d2, LAST_DAY("{0}")), GREATEST(d1, TO_DATE("{0}"))) 
+               + IF(d1 BETWEEN "{0}" AND LAST_DAY("{0}"),0,1)
+        ) AS `{1}`
+    '''
+
+iterate through the month list and use the above SQL to calculate number for each month:
+
+    df_new = df.withColumn('d1', F.to_date('d1')) \
+               .withColumn('d2', F.to_date('d2')) \
+               .selectExpr(
+                 'id_'
+               , 'p'
+               , *[ stmt.format(m, m[:7].replace('-','')) for m in mrange ]
+            )
+
+    df_new.show()
+    +---+---+------+------+------+------+------+------+------+------+------+------+------+------+------+------+
+    |id_|  p|201806|201807|201808|201809|201810|201811|201812|201901|201902|201903|201904|201905|201906|201907|
+    +---+---+------+------+------+------+------+------+------+------+------+------+------+------+------+------+
+    |  1|  A|     0|     0|     0|     4|    26|     0|     0|     0|     0|     0|     0|     0|     0|     0|
+    |  2|  B|     9|    19|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|
+    |  2|  B|     0|     0|    18|    30|     7|     0|     0|     0|     0|     0|     0|     0|     0|     0|
+    |  2|  B|     0|     0|     0|     0|     0|     0|     0|    31|    27|     0|     0|     0|     0|     0|
+    |  2|  B|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|     3|    25|     0|
+    |  3|  C|    15|    13|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|
+    |  3|  C|     0|     0|    16|    30|     9|     0|     0|     0|     0|     0|     0|     0|     0|     0|
+    |  3|  C|     0|     0|     0|     0|     0|     0|    28|    31|    28|    12|     0|     0|     0|     0|
+    |  3|  C|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|    21|     7|     0|
+    |  4|  A|     0|     0|     0|     0|     0|     0|     0|     1|    28|     1|     0|     0|     0|     0|
+    |  4|  B|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|     0|     1|    30|    25|
+    |  5|  C|     0|     0|     0|    11|    17|     0|     0|     0|     0|     0|     0|     0|     0|     0|
+    +---+---+------+------+------+------+------+------+------+------+------+------+------+------+------+------+
+
+##############################
+##############################
+Notes: generalize the Spark SQL snippet, so that it can be easily extended to other named ranges:
+Below `{0}` will be replaced by range_start_date, and `{1}` by range_end_date and `{2}` by range_name
+
+    stmt = '''
+        IF(d2 < "{0}" OR d1 > "{1}"
+         , 0
+         , DATEDIFF(LEAST(d2, TO_DATE("{1}")), GREATEST(d1, TO_DATE("{0}")))   
+               + IF(d1 BETWEEN "{0}" AND "{1}", 0, 1)
+        ) AS `{2}`
+    '''
+
+For quarterly, create a dictionary using quarter name as keys and a list of corresponding start_date and end_date as values    
+    range_dict = dict([ 
+        (str(c), [ c.to_timestamp().strftime("%Y-%m-%d")
+                  ,(c.to_timestamp() + pd.tseries.offsets.QuarterEnd()).strftime("%Y-%m-%d") 
+         ]) for c in pd.period_range(d.start_date, d.end_date, freq='Q') 
+    ])
+    #{'2018Q2': ['2018-04-01', '2018-06-30'],
+    # '2018Q3': ['2018-07-01', '2018-09-30'],
+    # '2018Q4': ['2018-10-01', '2018-12-31'],
+    # '2019Q1': ['2019-01-01', '2019-03-31'],
+    # '2019Q2': ['2019-04-01', '2019-06-30'],
+    # '2019Q3': ['2019-07-01', '2019-09-30']}
+
+    df_new = df.withColumn('d1', F.to_date('d1')) \
+               .withColumn('d2', F.to_date('d2')) \
+               .selectExpr(
+                 'id_'
+               , 'p'
+               , *[ stmt.format(range_dict[n][0], range_dict[n][1], n) for n in sorted(range_dict.keys()) ]
+            )
+
+    df_new.show()
+    +---+---+------+------+------+------+------+------+
+    |id_|  p|2018Q2|2018Q3|2018Q4|2019Q1|2019Q2|2019Q3|
+    +---+---+------+------+------+------+------+------+
+    |  1|  A|     0|     4|    26|     0|     0|     0|
+    |  2|  B|     9|    19|     0|     0|     0|     0|
+    |  2|  B|     0|    48|     7|     0|     0|     0|
+    |  2|  B|     0|     0|     0|    58|     0|     0|
+    |  2|  B|     0|     0|     0|     0|    28|     0|
+    |  3|  C|    15|    13|     0|     0|     0|     0|
+    |  3|  C|     0|    46|     9|     0|     0|     0|
+    |  3|  C|     0|     0|    28|    71|     0|     0|
+    |  3|  C|     0|     0|     0|     0|    28|     0|
+    |  4|  A|     0|     0|     0|    30|     0|     0|
+    |  4|  B|     0|     0|     0|     0|    31|    25|
+    |  5|  C|     0|    11|    17|     0|     0|     0|
+    +---+---+------+------+------+------+------+------+
+
+
+Method-1: Using Spark SQL:
+
+    ** range_dict for Monthly
+    #range_dict = dict([
+    #    (str(c), [ c.to_timestamp().strftime("%Y-%m-%d")
+    #              ,(c.to_timestamp() + pd.tseries.offsets.MonthEnd()).strftime("%Y-%m-%d")
+    #     ]) for c in pd.period_range(d.start_date, d.end_date, freq='M')
+    #])
+    range_dict = dict([
+        (c.strftime('%Y%m'), [ c.to_timestamp().date()
+                  ,(c.to_timestamp() + pd.tseries.offsets.MonthEnd()).date()
+         ]) for c in pd.period_range(d.start_date, d.end_date, freq='M')
+    ])
+    #{'201806': ['2018-06-01', '2018-06-30'],
+    # '201807': ['2018-07-01', '2018-07-31'],
+    # '201808': ['2018-08-01', '2018-08-31'],
+    # '201809': ['2018-09-01', '2018-09-30'],
+    # '201810': ['2018-10-01', '2018-10-31'],
+    # '201811': ['2018-11-01', '2018-11-30'],
+    # '201812': ['2018-12-01', '2018-12-31'],
+    # '201901': ['2019-01-01', '2019-01-31'],
+    # '201902': ['2019-02-01', '2019-02-28'],
+    # '201903': ['2019-03-01', '2019-03-31'],
+    # '201904': ['2019-04-01', '2019-04-30'],
+    # '201905': ['2019-05-01', '2019-05-31'],
+    # '201906': ['2019-06-01', '2019-06-30'],
+    # '201907': ['2019-07-01', '2019-07-31']}
+
+    # SQL snippet to calculate new column
+    stmt = ''' 
+         IF(d2 < "{0}" OR d1 > "{1}" 
+          , 0 
+          , DATEDIFF(LEAST(d2, to_date("{1}")), GREATEST(d1, to_date("{0}"))) 
+               + IF(d1 BETWEEN "{0}" AND "{1}", 0, 1) 
+         ) AS `{2}` 
+    '''     
+
+    # create TempView `df_table`
+    df.createOrReplaceTempView('df_table')
+
+    # set up the SQL field list
+    sql_fields_list = [ 
+          'id_'
+        , 'p'
+        , *[ stmt.format(range_dict[n][0], range_dict[n][1], n) for n in sorted(range_dict.keys()) ]
+    ]
+
+    # create SQL statement
+    sql_stmt = 'SELECT {} FROM df_table'.format(', '.join(sql_fields_list))
+
+    # run the Spark SQL:
+    spark.sql(sql_stmt).show()                                                                                          
++---+---+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+|id_|  p|2018-06|2018-07|2018-08|2018-09|2018-10|2018-11|2018-12|2019-01|2019-02|2019-03|2019-04|2019-05|2019-06|2019-07|
++---+---+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+|  1|  A|      0|      0|      0|      4|     26|      0|      0|      0|      0|      0|      0|      0|      0|      0|
+|  2|  B|      9|     19|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|
+|  2|  B|      0|      0|     18|     30|      7|      0|      0|      0|      0|      0|      0|      0|      0|      0|
+|  2|  B|      0|      0|      0|      0|      0|      0|      0|     31|     27|      0|      0|      0|      0|      0|
+|  2|  B|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|      3|     25|      0|
+|  3|  C|     15|     13|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|
+|  3|  C|      0|      0|     16|     30|      9|      0|      0|      0|      0|      0|      0|      0|      0|      0|
+|  3|  C|      0|      0|      0|      0|      0|      0|     28|     31|     28|     12|      0|      0|      0|      0|
+|  3|  C|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|     21|      7|      0|
+|  4|  A|      0|      0|      0|      0|      0|      0|      0|      1|     28|      1|      0|      0|      0|      0|
+|  4|  B|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|      0|      1|     30|     25|
+|  5|  C|      0|      0|      0|     11|     17|      0|      0|      0|      0|      0|      0|      0|      0|      0|
++---+---+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+
+
+Method-2: Using dataframe API functions:
+    
+    from pyspark.sql.functions import when, col, greatest, least, lit, datediff
+
+    df_new = df.select(
+          'id_'
+        , 'p'
+        , *[
+             when((col('d2') < range_dict[n][0]) | (col('d1') > range_dict[n][1]), 0).otherwise(
+                    datediff(least('d2', lit(range_dict[n][1])), greatest('d1', lit(range_dict[n][0])))
+                        + when(col('d1').between(range_dict[n][0], range_dict[n][1]), 0).otherwise(1)
+                ).alias(n)  
+                for n in sorted(range_dict.keys())
+           ]
+     )
+            
+More Samples:
+
+    N = 560000
+    df1 = pd.DataFrame({
+            'id_': sorted(np.random.choice(range(100),N))
+          , 'p': np.random.choice(list('ABCDEFGHIJKLMN'),N)
+          , 'd1': sorted(np.random.choice(pd.date_range('2016-06-01','2019-04-01',freq='D'),N))
+          , 'n': np.random.choice(list(map(lambda x: pd.Timedelta(days=x), range(300)),N)
+    })
+    df1['d2'] = df1['d1'] + df1['n']
+    df = spark.createDataFrame(df1)
+
