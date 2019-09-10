@@ -122,4 +122,48 @@ Method-2: use mapping and transform (Only for spark 2.4+)
     |   1|   2|   0|   3|   4|[col4, col5]|   [3, 4]|
     +----+----+----+----+----+------------+---------+
 
+An Extra question from SO (using the same approach):
+https://stackoverflow.com/questions/57762615/how-to-concat-values-of-columns-in-pyspark
+
+    map_cols = {'a':'newA', 'b':'newB', 'c':'newC', 'd':'newD'}
+   
+    df = spark.createDataFrame([
+          ('a_b', '1', '2', '7', '8') 
+        , ('a_b_c', '2', '3', '4', '4') 
+        , ('a_b_c_d', '3', '2', '4', '4') 
+        , ('c_d', '89', '5', '3', '5') 
+        , ('b_c_d', '7', '5', '6', '5') 
+      ], ['names', 'newA', 'newB', 'newC', 'newD'])
+
+    when_cases = '\n'.join([ "WHEN '{0}' THEN `{1}`".format(k,v) for k,v in map_cols.items() ])
+    stmt = '''transform(cols, x -> CASE CONCAT(x, '') {0} ELSE NULL END)'''.format(when_cases)
+
+    print(stmt)
+    #transform(cols, x -> CASE CONCAT(x, '') WHEN 'a' THEN `newA`
+    #WHEN 'c' THEN `newC`
+    #WHEN 'b' THEN `newB`
+    #WHEN 'd' THEN `newD` ELSE NULL END)
+
+    df.withColumn('cols', F.split('names', '_')).withColumn('col_vals', F.expr(stmt)).show()
+    +-------+----+----+----+----+------------+------------+
+    |  names|newA|newB|newC|newD|        cols|    col_vals|
+    +-------+----+----+----+----+------------+------------+
+    |    a_b|   1|   2|   7|   8|      [a, b]|      [1, 2]|
+    |  a_b_c|   2|   3|   4|   4|   [a, b, c]|   [2, 3, 4]|
+    |a_b_c_d|   3|   2|   4|   4|[a, b, c, d]|[3, 2, 4, 4]|
+    |    c_d|  89|   5|   3|   5|      [c, d]|      [3, 5]|
+    |  b_c_d|   7|   5|   6|   5|   [b, c, d]|   [5, 6, 5]|
+    +-------+----+----+----+----+------------+------------+
+
+    # add concat_ws(';')
+    df.withColumn('cols', F.split('names', '_')).withColumn('col_new', F.concat_ws(';', F.expr(stmt))).show()
+    +-------+----+----+----+----+------------+-------+
+    |  names|newA|newB|newC|newD|        cols|col_new|
+    +-------+----+----+----+----+------------+-------+
+    |    a_b|   1|   2|   7|   8|      [a, b]|    1;2|
+    |  a_b_c|   2|   3|   4|   4|   [a, b, c]|  2;3;4|
+    |a_b_c_d|   3|   2|   4|   4|[a, b, c, d]|3;2;4;4|
+    |    c_d|  89|   5|   3|   5|      [c, d]|    3;5|
+    |  b_c_d|   7|   5|   6|   5|   [b, c, d]|  5;6;5|
+    +-------+----+----+----+----+------------+-------+
 
