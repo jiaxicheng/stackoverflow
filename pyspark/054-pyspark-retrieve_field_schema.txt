@@ -1,0 +1,91 @@
+https://stackoverflow.com/questions/57868091/how-to-convert-string-column-to-arraytype-in-pyspark
+
+
+file:///home/hdfs/test/pyspark/json-6-2.file:
+{
+    "a_number": 5,
+    "a_string": "six",
+    "array_a": [
+      {
+        "array b": [{"a": "1", "b": 2}],
+        "struct_c": {"a": 1.1, "b": 1.3},
+        "array_d": ["a", "b", "c"]
+      },
+      {
+        "array b": [{"a": "3", "b": 4}],
+        "struct_c": {"a": 1.5, "b": 1.6},
+        "array_d": ["x", "y", "z"]
+      }
+    ]
+}
+
+Data Setup:
+
+    from pyspark.sql.functions import regexp_replace, from_json, to_json
+
+    df = spark.read.json("file:///home/hdfs/test/pyspark/json-6-2.txt", multiLine=True)
+
+    df.show(1,0)
+    +--------+--------+----------------------------------------------------------------------+
+    |a_number|a_string|array_a                                                               |
+    +--------+--------+----------------------------------------------------------------------+
+    |5       |six     |[[[[1, 2]], [a, b, c], [1.1, 1.3]], [[[3, 4]], [x, y, z], [1.5, 1.6]]]|
+    +--------+--------+----------------------------------------------------------------------+
+
+    df.printSchema()
+    root
+     |-- a_number: long (nullable = true)
+     |-- a_string: string (nullable = true)
+     |-- array_a: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- array b: array (nullable = true)
+     |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |-- a: string (nullable = true)
+     |    |    |    |    |-- b: long (nullable = true)
+     |    |    |-- array_d: array (nullable = true)
+     |    |    |    |-- element: string (containsNull = true)
+     |    |    |-- struct_c: struct (nullable = true)
+     |    |    |    |-- a: double (nullable = true)
+     |    |    |    |-- b: double (nullable = true)
+
+    
+1. retrieve the schema for the field `array_a`
+
+    Method-1: using schema.jsonValue() and ArrayType.fromJson()
+
+        from pyspark.sql.types import ArrayType
+
+        # get the schema of the array field `array_a` in JSON
+        schema_data = df.select('array_a').schema.jsonValue()['fields'][0]['type']
+
+        # convert it into pyspark.sql.types.ArrayType:
+        schema_field = ArrayType.fromJson(schema_data)
+        #ArrayType(StructType(List(StructField(array b,.....,true))),true)
+
+    Method-2: using schema.simpleString()
+
+        schema = df.select('array_a').schema.simpleString()
+        #'struct<array_a:array<....>>
+
+        field_schema = schema[schema.find(':')+1:-1]
+        #'array<...>'
+        
+        **Note:** There will be problem using df.schema.simpleString() for the field_schema 
+                  if any of the fields in `networkinfos` contain special characters, i.e. spaces 
+                  in which you will have to manually enclose such fields with backticks.
+
+
+2. with field_schema, we can use from_json to set it back to its original schema from the modified JSON strings:
+
+    df_new = df \
+            .withColumn('array_a', to_json('array_a')) \
+            .withColumn('array_a', regexp_replace('array_a', '1', '999')) \
+            .withColumn('array_a', from_json('array_a', field_schema))
+
+
+    df_new.show(1,0)
+    +--------+--------+----------------------------------------------------------------------------------+
+    |a_number|a_string|array_a                                                                           |
+    +--------+--------+----------------------------------------------------------------------------------+
+    |5       |six     |[[[[999, 2]], [a, b, c], [999.999, 999.3]], [[[3, 4]], [x, y, z], [999.5, 999.6]]]|
+    +--------+--------+----------------------------------------------------------------------------------+
