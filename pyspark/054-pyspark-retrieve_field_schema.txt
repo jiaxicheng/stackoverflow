@@ -1,5 +1,13 @@
 https://stackoverflow.com/questions/57868091/how-to-convert-string-column-to-arraytype-in-pyspark
 
+Use cases: The StructType or ArrayType fields contain nested data which is not practical 
+           to iterate one by one for some common adjustments. The task is to converting them 
+           into StringType field and make modification in one go and then converting the String 
+           back to its original DataType. 
+
+Solution: Using to_json() and from_json() API functions, assumed the adjustments do not break 
+          the JSON data. The key is to find and keep the schema of ArrayType/StructType field
+          which can be used in from_json() function.
 
 file:///home/hdfs/test/pyspark/json-6-2.file:
 {
@@ -61,6 +69,9 @@ Data Setup:
         # convert it into pyspark.sql.types.ArrayType:
         schema_field = ArrayType.fromJson(schema_data)
         #ArrayType(StructType(List(StructField(array b,.....,true))),true)
+
+        **Note:** for StructType field, use field_schema = StructType.fromJson(schema_data)
+                  schema_data is retrieved in the same method as used for ArrayType.
 
     Method-2: using schema.simpleString()
 
