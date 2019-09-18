@@ -1,0 +1,29 @@
+https://stackoverflow.com/questions/57981165/using-reducebykey-method-in-pyspark-to-update-a-dictionary
+
+Use mapValues():
++ convert string to list so we can use `operator.add` to union all related values 
++ convert list into dictionary comprehension
++ set up default values for missing keys
+
+
+    from operator import add
+
+    rd0= sc.parallelize([(13, 'munich@en'),(13, 'munchen@de'), (14, 'Vienna@en'),(14,'Wien@de'),(15,'Paris@en')])
+
+    rd0.mapValues(lambda x: [x]) \
+       .reduceByKey(add) \
+       .mapValues(lambda x: { e[1]:e[0] for a in x for e in [a.split('@')] }) \
+       .mapValues(lambda x: { k:x.get(k, '') for k in ['en', 'de']}) \
+       .collect()
+    #[(13, {'de': 'munchen', 'en': 'munich'}),
+    # (14, {'de': 'Wien', 'en': 'Vienna'}),
+    # (15, {'de': '', 'en': 'Paris'})]
+
+
+Point:
+ * A transformation of `mapValues(lambda x: [x])` is often useful to convert mutiple related values/strings 
+   into a list. there is no issue when combining/reducing in the same partition or between a different
+   partition. both can use the same operator.add. using plain strings or values for reduceByKey, you will
+   have to consider different approach dealing intraPartition (list add string) and interPartition (list add list).
+
+
