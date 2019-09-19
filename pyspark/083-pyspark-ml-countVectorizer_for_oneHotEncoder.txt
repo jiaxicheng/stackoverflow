@@ -54,3 +54,56 @@ check the `c2` list using the model.vocabulary.
     |     [Xyz, ABC]| (5,[0,2],[1.0,1.0])|  1|  0|  1|  0|  0|
     +---------------+--------------------+---+---+---+---+---+
     
+
+#### Another Example with CountVectorizer ####
+https://stackoverflow.com/questions/58011738/pyspark-getting-features-for-clustering-from-list
+
+Use KMeans for clustering:
+
+    df = spark.createDataFrame([
+          ('1', '45') 
+        , ('2', '58') 
+        , ('3', '2') 
+        , ('1', '97') 
+        , ('1', '2') 
+        , ('2', '3') 
+        ], ['user', 'item'])
+
+Note: item should be StringType() to use CountVectorizer
+
+    from pyspark.sql.functions import collect_set
+    from pyspark.ml.feature import CountVectorizer
+    from pyspark.ml.clustering import KMeans
+
+    # collect all unique items for each user
+    df1 = df.groupby('user').agg(collect_set('item').alias('items'))
+
+    # setup cv model
+    cv = CountVectorizer(inputCol='items', outputCol='features')
+    model = cv.fit(df1)
+
+    # create df2 to add features column
+    df2 = model.transform(df1)
+    df2.show(truncate=False)
+    +----+-----------+-------------------------+
+    |user|items      |features                 |
+    +----+-----------+-------------------------+
+    |3   |[2]        |(5,[0],[1.0])            |
+    |1   |[45, 2, 97]|(5,[0,1,2],[1.0,1.0,1.0])|
+    |2   |[3, 58]    |(5,[3,4],[1.0,1.0])      |
+    +----+-----------+-------------------------+
+
+    # setup KMean model
+    kmeans = KMeans(k=2, seed=12)
+
+    model2 = kmeans.fit(df2)
+
+    model2.transform(df2).show(truncate=False)
+    +----+-----------+-------------------------+----------+
+    |user|items      |features                 |prediction|
+    +----+-----------+-------------------------+----------+
+    |3   |[2]        |(5,[0],[1.0])            |1         |
+    |1   |[45, 2, 97]|(5,[0,1,2],[1.0,1.0,1.0])|1         |
+    |2   |[3, 58]    |(5,[3,4],[1.0,1.0])      |0         |
+    +----+-----------+-------------------------+----------+
+
