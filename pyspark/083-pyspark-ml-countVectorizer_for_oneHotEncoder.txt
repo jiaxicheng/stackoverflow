@@ -3,7 +3,7 @@ Target: convert a array of strings containing arbitrary number of elements into 
 
 An interesting way to create a list of OneHotEncoder by using pyspark.ml.feature.CountVectorizer
 
-+ Just need to remove potential duplicate items in the array
++ need to set binary=True default is False
 
 REF:https://stackoverflow.com/questions/58010126/pyspark-string-array-of-dynamic-length-in-dataframe-column-to-onehot-encoded/58012725#58012725
 
@@ -19,14 +19,9 @@ Data Setup:
         ], ['arr']
     )
     
-Remove duplicates in the `arr` column
-
-    # remove duplicate items in the same array
-    df = df.withColumn('arr', array_distinct('arr'))
-    
 Set up CountVectorizer model and check the model.vocabulary
    
-    cv = CountVectorizer(inputCol='arr', outputCol='c1')
+    cv = CountVectorizer(inputCol='arr', outputCol='c1', binary=True)
     
     model = cv.fit(df)
     
