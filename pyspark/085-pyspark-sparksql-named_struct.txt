@@ -1,0 +1,82 @@
+https://stackoverflow.com/questions/57941836/find-min-and-max-range-with-a-combination-of-column-values-in-pyspark
+
+Spark SQL: using an array of named_struct to construct some complex logic:
+
+Setup the data:    
+    
+    from pyspark.sql import Window
+    from pyspark.sql.functions import lag, lead, expr, explode, to_date
+    
+    df = spark.createDataFrame([
+          (1, 'A', '2018-09-26', '2018-10-26')      
+        , (2, 'B', '2018-06-21', '2018-07-19')  
+        , (2, 'C', '2018-07-13', '2018-10-07')  
+        , (2, 'B', '2018-12-31', '2019-02-27')  
+        , (2, 'A', '2019-01-28', '2019-06-25')  
+      ], ['id_', 'p', 'd1', 'd2'])
+
+    df.printSchema()
+    root
+     |-- id_: long (nullable = true)
+     |-- p: string (nullable = true)
+     |-- d1: string (nullable = true)
+     |-- d2: string (nullable = true)
+    
+    # convert d1, d2 to DateType() if they are StringType()
+    df = df.withColumn('d1', to_date('d1')).withColumn('d2', to_date('d2'))
+    
+create prev_p, prev_d2 and next_d1 and cut off the d2 to the least of current d2 and the next_d1(with -1 day off)
+
+    # set up WindowSpec to calculate prev_p, prev_d2 and next_d1
+    w1 = Window.partitionBy('id_').orderBy('d1')
+    
+    df1 = df.withColumn('prev_d2', lag('d2').over(w1)) \
+            .withColumn('prev_p', lag('p').over(w1)) \
+            .withColumn('next_d1', lead('d1').over(w1)) \
+            .withColumn('d2', expr('least(d2, date_sub(next_d1,1))'))
+    
+    +---+---+----------+----------+----------+------+----------+                    
+    |id_|  p|        d1|        d2|   prev_d2|prev_p|   next_d1|
+    +---+---+----------+----------+----------+------+----------+
+    |  1|  A|2018-09-26|2018-10-26|      null|  null|      null|
+    |  2|  B|2018-06-21|2018-07-19|      null|  null|2018-07-13|
+    |  2|  C|2018-07-13|2018-10-07|2018-07-19|     B|2018-12-31|
+    |  2|  B|2018-12-31|2019-02-27|2018-10-07|     C|2019-01-28|
+    |  2|  A|2019-01-28|2019-06-25|2019-02-27|     B|      null|
+    +---+---+----------+----------+----------+------+----------+
+    
+Set up a SQL snippet to create an array of named_struct based on d1 and prev_d2:
+
++ if d1 < prev_d2, the array will have two elements, one from d1 to prev_d2 with p=(prev_p, p)
+  another element from prev_d2+1 to the adjusted d2 with p=p
++ otherwise, no overlap, just keep what it is
+    
+    stmt = '''
+        IF(d1 < prev_d2
+            , array(named_struct('q', concat(prev_p, ' ', p), 'd1', d1, 'd2', prev_d2)
+                  , named_struct('q', p, 'd1', date_add(prev_d2,1), 'd2', d2))
+            , array(named_struct('q', p, 'd1', d1, 'd2', d2))
+        )
+    '''
+    
+Generate the data by executing the above stmt and explode the resulting array.
+select id_ and data.* for the result:
+    
+    df_new = df1.withColumn('data', explode(expr(stmt))) \
+                .select('id_', 'data.*')
+    
+    df_new.show()
+    +---+---+----------+----------+                                                 
+    |id_|  p|        d1|        d2|
+    +---+---+----------+----------+
+    |  1|  A|2018-09-26|2018-10-26|
+    |  2|  B|2018-06-21|2018-07-12|
+    |  2|B C|2018-07-13|2018-07-19|
+    |  2|  C|2018-07-20|2018-10-07|
+    |  2|  B|2018-12-31|2019-01-27|
+    |  2|B A|2019-01-28|2019-02-27|
+    |  2|  A|2019-02-28|2019-06-25|
+    +---+---+----------+----------+
+    
+Note: using array of arrays might have less overhead than using array of named_structs
+      the sample only shows the code-logic to handle the proposed question.
