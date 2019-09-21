@@ -1,0 +1,123 @@
+https://stackoverflow.com/questions/57941836/find-min-and-max-range-with-a-combination-of-column-values-in-pyspark
+
+Considering potential any number of overlapping date_ranges, a join suonds to be inevitable.
+
+Based on OP's comment and update, since any number of overlappings might happen, I think 
+a dataframe JOIN is probably most straightforwd way. Below is one proposed solution I tested 
+on Spark 2.4.0 (array_join, transform, sequence etc. require Spark 2.4+):
+
+Setup the data:    
+    
+    from pyspark.sql import Window
+    from pyspark.sql.functions import lead, expr, to_date, collect_set, array_sort, array_join, broadcast
+    
+    df = spark.createDataFrame([
+          (1, 'A', '2018-09-26', '2018-10-26') 
+        , (2, 'B', '2018-06-21', '2018-07-19') 
+        , (2, 'C', '2018-06-27', '2018-07-07') 
+        , (2, 'A', '2018-07-02', '2019-02-27') 
+        , (2, 'A', '2019-03-28', '2019-06-25') 
+      ], ['id_', 'p', 'd1', 'd2'])
+
+    # convert d1, d2 to DateType() if they are StringType()
+    df = df.withColumn('d1', to_date('d1')).withColumn('d2', to_date('d2'))
+    
+    df.printSchema()
+    root
+     |-- id_: long (nullable = true)
+     |-- p: string (nullable = true)
+     |-- d1: date (nullable = true)
+     |-- d2: date (nullable = true)
+    
+Create a new df_drange containing all distinct dates from d1 and d2,
+sort them and segement them into interval date ranges
+
+    df_drange = df.select('id_', 'd1').union(df.select('id_', 'd2')) \
+        .groupby('id_') \
+        .agg(array_sort(collect_set('d1')).alias('dates')) \
+        .withColumn('dates', expr("""
+             explode(transform(sequence(0, size(dates)-2), i -> named_struct('d1', dates[i], 'd2', dates[i+1])))
+           """)) \
+        .select('id_', 'dates.*')
+
+    df_drange.show()
+    +---+----------+----------+                                                     
+    |id_|        d1|        d2|
+    +---+----------+----------+
+    |  1|2018-09-26|2018-10-26|
+    |  2|2018-06-21|2018-06-27|
+    |  2|2018-06-27|2018-07-02|
+    |  2|2018-07-02|2018-07-07|
+    |  2|2018-07-07|2018-07-19|
+    |  2|2018-07-19|2019-02-27|
+    |  2|2019-02-27|2019-03-28|
+    |  2|2019-03-28|2019-06-25|
+    +---+----------+----------+
+
+Left join with the original df and for each id_ with any overlapping
+between (d1, d2) of df_dranges and (d1, d2) of the original df
+groupby the (id_, d1, d2) from df_drange and get the array_join(collect_set(p), ' ')
+broadcast join is added for df_drange:
+
+    df1 = broadcast(df_drange).join(
+          df
+        , (df.id_ == df_drange.id_) & (df.d1 < df_drange.d2) & (df.d2 > df_drange.d1)
+        , how = 'left'
+    ).groupby(df_drange.id_, df_drange.d1, df_drange.d2) \
+     .agg(array_join(collect_set('p'), ' ').alias('q')) 
+
+    df1.show()
+    +---+----------+----------+-----+
+    |id_|        d1|        d2|    q|
+    +---+----------+----------+-----+
+    |  1|2018-09-26|2018-10-26|    A|
+    |  2|2018-06-21|2018-06-27|    B|
+    |  2|2018-06-27|2018-07-02|  C B|
+    |  2|2018-07-02|2018-07-07|C B A|
+    |  2|2018-07-07|2018-07-19|  B A|
+    |  2|2018-07-19|2019-02-27|    A|
+    |  2|2019-02-27|2019-03-28|     |
+    |  2|2019-03-28|2019-06-25|    A|
+    +---+----------+----------+-----+
+
+For df1, if q == '', there is a gap, we need to remove such rows.
+`d2` must be kept as-is if the next drange is a gap or it is the last drange on the same `id_`
+, otherwise `d2` needs `-1` day off. we can adjust d2 based on the following logic (after we remove
+gaps, next_d1 shoule be greater than `d2`) `d2 = IF(next_d1 == d2, date_sub(d2,1), d2) `:
+
+    # WindowSpec to calculate next_d1
+    w1 = Window.partitionBy('id_').orderBy('d1')
+
+    # filter out gaps and calculate next_d1 and the adjusted d2
+    df_new = df1.where('q!= ""') \
+                .withColumn('next_d1', lead('d1').over(w1)) \
+                .selectExpr('id_', 'q', 'd1', 'IF(next_d1 == d2, date_sub(d2,1), d2) AS d2') 
+
+    df_new.show()
+    +---+-----+----------+----------+                                               
+    |id_|    q|        d1|        d2|
+    +---+-----+----------+----------+
+    |  1|    A|2018-09-26|2018-10-26|
+    |  2|    B|2018-06-21|2018-06-26|
+    |  2|  C B|2018-06-27|2018-07-01|
+    |  2|C B A|2018-07-02|2018-07-06|
+    |  2|  B A|2018-07-07|2018-07-18|
+    |  2|    A|2018-07-19|2019-02-27|
+    |  2|    A|2019-03-28|2019-06-25|
+    +---+-----+----------+----------+
+
+Some notes:
+
+* If you want to show duplicated p-values in `q`, then change `collect_set` to `collect_list`
+  when calculating *df1*
+* If the order of the combined p-values matters, you can add another sequence column, for example
+  using `rn = row_number().over(w1)`, setting element of `q` to `F.concat_ws('-', 'rn', 'p')` 
+  and then transform it back to `p` later
+
+    # q calculation, pesudo-code
+    q = array_join(array_sort(collect_set(F.concat_ws('-', 'rn', 'p'))), ' ')
+
+    # remove `rn-` from each p-values
+    df1 = df1.withColumn('q', regexp_replace('q', r'\b\d+-', ''))
+
+
