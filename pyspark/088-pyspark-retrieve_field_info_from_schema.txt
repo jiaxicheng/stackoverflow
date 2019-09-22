@@ -1,0 +1,20 @@
+https://stackoverflow.com/questions/58048745/how-to-detect-if-decimal-columns-should-be-converted-into-integer-or-double
+
+Find all column names with datetype == DecimalType() 
+
+Using the schema of the dataframe: `df.schema.jsonValue()['fields']`
+
+    from pyspark.sql.functions import col
+
+    df = spark.createDataFrame([ (1, 12.3, 1.5, 'test', 13.23) ], ['i1', 'd2', 'l3', 's4', 'd5'])
+
+    df = df.withColumn('d2', col('d2').astype('decimal(10,1)')) \
+           .withColumn('d5', col('d5').astype('decimal(10,2)'))
+
+    #DataFrame[i1: bigint, d2: decimal(10,1), l3: double, s4: string, d5: decimal(10,2)]
+
+    decimal_cols = [ f['name'] for f in df.schema.jsonValue()['fields'] if f['type'].startswith('decimal') ]
+    
+    print(decimal_cols)
+    ['d2', 'd5']
+
