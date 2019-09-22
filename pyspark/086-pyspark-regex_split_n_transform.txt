@@ -1,0 +1,109 @@
+https://stackoverflow.com/questions/58041497/find-starting-and-ending-index-of-each-unique-charcters-in-a-string-in-python
+
+Finding starting and ending indexes of substrings containing consecutive unique character:
+
+    from pyspark.sql.functions import array_remove, split, regexp_replace, expr
+
+    df = spark.createDataFrame([(e,) for e in ["aaabbbb0000ccaa", 'ttttesst']], ['x'])
+
+    """
+    (1) use regexp_replace to add an anchor string `\0` to the right of each consecutive character
+    (2) use `\0` as delimiter to split the string into an array `x1` and remove the EMPTY element
+    (3) calculate length of each array element of array `x1`, save the result into array `l1`
+    (4) calculate the incremental-size of the elements in array `l1` and save the result into array `l2`
+    """
+    df1 = df.withColumn('x1', array_remove(split(regexp_replace('x', r'((.)\2*)', '$1\0'), '\0'), '')) \
+            .withColumn('l1', expr("""transform(x1, e -> length(e))""")) \
+            .withColumn('l2', expr("""
+                    transform(sequence(1, size(l1)), i -> aggregate(slice(l1,1,i), 0 ,(x,y) -> x+y))
+                """)) 
+
+    df1.show(truncate=False)
+    +---------------+-------------------------+---------------+------------------+
+    |x              |x1                       |l1             |l2                |
+    +---------------+-------------------------+---------------+------------------+
+    |aaabbbb0000ccaa|[aaa, bbbb, 0000, cc, aa]|[3, 4, 4, 2, 2]|[3, 7, 11, 13, 15]|
+    |ttttesst       |[tttt, e, ss, t]         |[4, 1, 2, 1]   |[4, 5, 7, 8]      |
+    +---------------+-------------------------+---------------+------------------+
+
+    """create a named_struct, with i iterating from `0` to `size(x1)-1`,
+    and retrive name from the first character of x1, `start` and `end` from `l2` array
+    """
+    df2 = df1.withColumn('x2', expr("""
+             explode(
+               transform(sequence(0, size(x1)-1), i -> named_struct(
+                   'name', left(x1[i],1)
+                 , 'start', IF(i=0, 0, l2[i-1])
+                 , 'end', l2[i]-1
+             )))
+         """)).select('x', 'x2.*')
+
+    df2.show()
+    +---------------+----+-----+---+
+    |              x|name|start|end|
+    +---------------+----+-----+---+
+    |aaabbbb0000ccaa|   a|    0|  2|
+    |aaabbbb0000ccaa|   b|    3|  6|
+    |aaabbbb0000ccaa|   0|    7| 10|
+    |aaabbbb0000ccaa|   c|   11| 12|
+    |aaabbbb0000ccaa|   a|   13| 14|
+    |       ttttesst|   t|    0|  3|
+    |       ttttesst|   e|    4|  4|
+    |       ttttesst|   s|    5|  6|
+    |       ttttesst|   t|    7|  7|
+    +---------------+----+-----+---+
+
+Some notes: 
+ (1) If only want to find chars in consecutive at least 2-char string, then filter df2 by:
+
+    df2.where('start != end')
+
+ (2) Use python with plain regex:
+
+    import re
+    x = 'aaabbbbccc'
+    for m in re.finditer(r'(.)\1+', x):
+      print m.group(1), m.start(), m.end()-1
+    #a 0 2
+    #b 3 6
+    #c 7 9
+
+*(3) regexp_replace: capturing is similar to Perl's: use `\1`, `\2` in pattern and `$1`, `$2` in replacement.
+     PCRE(Perl regex) is not supported in Spark SQL, thus regexp_replace() works differently between
+     F.expr('regexp_replace(..)') and F.regexp_replace(..)
+
+ (4) difference between array_except and array_remove:
+     array_except(arr, F.array(lit(''), 'x')): remove more than one values from `arr`
+     array_rempve(arr, ''): remove all '' from `arr` (only one value)
+
+#####
+Similar Question: 
+if only want to find the first and last index of each unique character in the String, then
+
+    from pyspark.sql.functions import array_remove, split
+
+    """Note: use array_remove() to remove the EMPTY element(the last one) from split"""
+    df.withColumn('arr', array_remove(split('x', ''), '')) \
+      .withColumn('data', expr('''
+            explode(
+              transform(
+                  array_distinct(arr)
+                , e -> named_struct('name', e, 'start', instr(x, e)-1, 'end', length(x)-instr(reverse(x),e))
+              ) 
+            )        
+      ''')).select('x', 'data.*').show()
+    +---------------+----+-----+---+
+    |              x|name|start|end|
+    +---------------+----+-----+---+
+    |aaabbbb0000ccaa|   a|    0| 14|
+    |aaabbbb0000ccaa|   b|    3|  6|
+    |aaabbbb0000ccaa|   0|    7| 10|
+    |aaabbbb0000ccaa|   c|   11| 12|
+    |       ttttesst|   t|    0|  7|
+    |       ttttesst|   e|    4|  4|
+    |       ttttesst|   s|    5|  6|
+    +---------------+----+-----+---+
+
+#####
+Questions: How to quickly check if a String containg only a single character in SparkSQL
+
