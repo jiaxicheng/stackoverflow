@@ -78,7 +78,10 @@ broadcast join is added for df_drange:
 
     df1 = broadcast(df_drange).join(
           df2
-        , (df2.id_ == df_drange.id_) & (df2.d1 < df_drange.d2) & (df2.d2 > df_drange.d1)
+        , (df2.id_ == df_drange.id_) & (
+                ((df2.d1 < df_drange.d2) & (df2.d2 > df_drange.d1))
+              | ((df_drange.d1 == df_drange.d2) & df_drange.d1.between(df2.d1, df2.d2))
+          )
         , how = 'left'
     ).groupby(df_drange.id_, df_drange.d1, df_drange.d2, df_drange.flag) \
      .agg(array_join(collect_set('p'), ' ').alias('q')) 
