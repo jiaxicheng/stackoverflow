@@ -18,3 +18,27 @@ Using the schema of the dataframe: `df.schema.jsonValue()['fields']`
     print(decimal_cols)
     ['d2', 'd5']
 
+However the above will not work if decimal fields are saved in nested data structures. in such case,
+you might probably modify the schema directly and then reload the data into a new dataframe. 
+
+    from pyspark.sql.types import StructType
+    import re
+    import json
+
+    df1 = df.withColumn('a3', F.array('d2','d5'))    
+    # DataFrame[i1: bigint, d2: decimal(10,1), f3: double, s4: string, d5: decimal(10,2), a3: array<decimal(11,2)>]
+
+    # export schema into JSON string
+    old_schema_json = df1.schema.json()
+    
+    # use regex to modify all decimal(d,d) to double
+    new_schema_json = re.sub('"decimal\(\d+,\d+\)"', '"double"', old_schema_json)
+
+    # convert the new json string into StructType
+    new_schema = StructType.fromJson(json.loads(new_schema_json))
+    print(new_schema.simpleString())
+    # 'struct<i1:bigint,d2:double,f3:double,s4:string,d5:double,a3:array<double>>'
+
+    df2 = spark.createDataFrame(df1.rdd, new_schema)
+    # DataFrame[i1: bigint, d2: double, f3: double, s4: string, d5: double, a3: array<double>]
+
