@@ -18,27 +18,71 @@ Using the schema of the dataframe: `df.schema.jsonValue()['fields']`
     print(decimal_cols)
     ['d2', 'd5']
 
-However the above will not work if decimal fields are saved in nested data structures. in such case,
-you might probably modify the schema directly and then reload the data into a new dataframe. 
+**Update-2**: the above method will not work if *decimal* fields are saved in a nested data structure, for example, in *array*, *struct* especially when they are deeply nested fields.
+
+To process nested data structures, first retrieve the jsonValue() of corresponding 
+field dtype definition, dump it to json string, use regex to adjust datatype and 
+then convert it back to ArrayType().
+
+**Note:** The below is an example for ArrayType(), you can do the samilar to StructType())
 
     from pyspark.sql.types import StructType
+    from pyspark.sql.functions import array
     import re
     import json
+ 
+    df1 = df.withColumn('a6', array('d2','d5'))
+    # DataFrame[i1: bigint, d2: decimal(10,1), f3: double, s4: string, d5: decimal(10,2), a6: array<decimal(11,2)>]
+ 
+    dtype_old = json.dumps(df1.select('a6').schema.jsonValue()['fields'][0]['type'])
+    # '{"containsNull": true, "elementType": "decimal(11,2)", "type": "array"}'
 
-    df1 = df.withColumn('a3', F.array('d2','d5'))    
-    # DataFrame[i1: bigint, d2: decimal(10,1), f3: double, s4: string, d5: decimal(10,2), a3: array<decimal(11,2)>]
+    dtype_adjusted = re.sub('"decimal\(\d+,\d+\)"', '"double"', dtype_old)
+    # '{"containsNull": true, "elementType": "double", "type": "array"}'
+
+    dtype_new = ArrayType.fromJson(json.loads(dtype_adjusted))
+    # ArrayType(DoubleType,true)
+
+    df1.withColumn('a6', F.col('a6').astype(dtype_new))
+    # DataFrame[i1: bigint, d2: decimal(10,1), l3: double, s4: string, d5: decimal(10,2), a6: array<double>]
+
+For multiple columns, you can create a function and update it in a list comprehension. 
+
+Or probably upadate the whole schema in one time:
 
     # export schema into JSON string
     old_schema_json = df1.schema.json()
-    
+ 
     # use regex to modify all decimal(d,d) to double
     new_schema_json = re.sub('"decimal\(\d+,\d+\)"', '"double"', old_schema_json)
-
+ 
     # convert the new json string into StructType
     new_schema = StructType.fromJson(json.loads(new_schema_json))
     print(new_schema.simpleString())
-    # 'struct<i1:bigint,d2:double,f3:double,s4:string,d5:double,a3:array<double>>'
-
+    # 'struct<i1:bigint,d2:double,f3:double,s4:string,d5:double,a6:array<double>>'
+ 
     df2 = spark.createDataFrame(df1.rdd, new_schema)
-    # DataFrame[i1: bigint, d2: double, f3: double, s4: string, d5: double, a3: array<double>]
+    # DataFrame[i1: bigint, d2: double, f3: double, s4: string, d5: double, a6: array<double>]
 
+**Note:**
+
+ + df1.dtypes can also export `('a6', 'array<decimal(11,2)>')`, we can do re.sub() here. but for StructType()
+   the simpleString() will have issues when the field_names contain spaces or other meta chars. Using 
+   df.schema.jsonValue() is usually more robust way since it take care of the invalid characters if not quoted
+   in names of StructType()
+   
+The following solution describes how to define a function to modify nested data structures using the list from df.dtypes.
+make sure no spaces/dot etc shown in field names of StructType() columns:
+
+    import re
+    from pyspark.sql.functions import array, struct, col
+    
+    to_decimal = lambda x: re.sub(r'decimal\(\d+,\d+\)','double',x)
+
+    df2 = df.withColumn('a6', array('d2','d5')).withColumn('s7', struct('i1','d2'))
+    # DataFrame[i1: bigint, d2: decimal(10,1), l3: double, s4: string, d5: decimal(10,2), a6: array<decimal(11,2)>, s7: struct<i1:bigint,d2:decimal(10,1)>]
+
+    df2.select(*[ F.col(d[0]).astype(to_decimal(d[1])) if 'decimal' in d[1] else F.col(d[0]) for d in df1.dtypes ])
+    # DataFrame[i1: bigint, d2: double, l3: double, s4: string, d5: double, a6: array<double>, s7: struct<i1:bigint,d2:double>]
+
+   
