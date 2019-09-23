@@ -1,0 +1,144 @@
+https://stackoverflow.com/questions/57941836/find-min-and-max-range-with-a-combination-of-column-values-in-pyspark
+
+Considering potential any number of overlapping date_ranges, a join suonds to be inevitable.
+
+Based on OP's comment and update, since any number of overlappings might happen, I think 
+a dataframe JOIN is probably most straightforwd way. Below is one proposed solution I tested 
+on Spark 2.4.0 (array_join, transform, sequence etc. require Spark 2.4+):
+
+Setup the data:    
+    
+    from pyspark.sql import Window
+    from pyspark.sql.functions import (lead, expr, to_date, collect_set, array_sort
+         , array_join, broadcast, lit, concat, coalesce)
+    
+    df = spark.createDataFrame([
+          (1, 'A', '2018-09-26', '2018-10-26') 
+        , (2, 'B', '2018-06-21', '2018-07-19') 
+        , (2, 'C', '2018-06-27', '2018-07-07') 
+        , (2, 'A', '2018-07-02', '2019-02-27') 
+        , (2, 'A', '2019-03-28', '2019-06-25') 
+      ], ['id_', 'p', 'd1', 'd2'])
+
+Create a new df_drange containing all distinct dates from d1 and d2,
+plus a flag which list as `1` when it's from d2 and `0` otherwise
+sort them and segement them into interval date ranges and split
+the fields d1, d2, flag(d1 only) and convert them into proper DataType()
+
+Note: flag is to identify if df_drange.d1 is from the d2 in the original dataframe
+
+    df_drange = df.select('id_', 'd1', lit(0).alias('flag')).union(df.select('id_', 'd2', lit(1))) \
+        .groupby('id_') \
+        .agg(array_sort(collect_set(concat('d1', lit('-'), 'flag'))).alias('dates')) \
+        .withColumn('dates', expr("""
+             explode(transform(sequence(0, size(dates)-2), i -> named_struct('d1', dates[i], 'd2', dates[i+1])))
+           """)) \
+        .selectExpr(
+             'id_'
+           , "to_date(substring_index(dates.d1, '-', 3)) as d1"
+           , "to_date(substring_index(dates.d2, '-', 3)) as d2"
+           , "boolean(substring_index(dates.d1, '-', -1)) as flag"
+         ).where('d1 != d2')
+
+    df_drange.orderBy('id_','d1').show()
+    +---+----------+----------+-----+                                               
+    |id_|        d1|        d2| flag|
+    +---+----------+----------+-----+
+    |  1|2018-09-26|2018-10-26|false|
+    |  2|2018-06-21|2018-06-27|false|
+    |  2|2018-06-27|2018-07-02|false|
+    |  2|2018-07-02|2018-07-07|false|
+    |  2|2018-07-07|2018-07-19| true|
+    |  2|2018-07-19|2019-02-27| true|
+    |  2|2019-02-27|2019-03-28| true|
+    |  2|2019-03-28|2019-06-25|false|
+    +---+----------+----------+-----+
+
+    df_drange.printSchema()
+    root
+     |-- id_: long (nullable = true)
+     |-- d1: date (nullable = true)
+     |-- d2: date (nullable = true)
+     |-- flag: boolean (nullable = true)
+
+    """ original df, just convert d1 and d2 from StringType() to DateType()"""
+    df2 = df.withColumn('d1', to_date('d1')).withColumn('d2', to_date('d2'))
+
+    df2.printSchema()
+    root
+     |-- id_: long (nullable = true)
+     |-- p: string (nullable = true)
+     |-- d1: date (nullable = true)
+     |-- d2: date (nullable = true)
+
+Left join with the original df and for each id_ with any overlapping
+between (d1, d2) of df_dranges and (d1, d2) of the original df
+groupby the (id_, d1, d2, flag) from df_drange and get the array_join(collect_set(p), ' ')
+broadcast join is added for df_drange:
+
+    df1 = broadcast(df_drange).join(
+          df2
+        , (df2.id_ == df_drange.id_) & (df2.d1 < df_drange.d2) & (df2.d2 > df_drange.d1)
+        , how = 'left'
+    ).groupby(df_drange.id_, df_drange.d1, df_drange.d2, df_drange.flag) \
+     .agg(array_join(collect_set('p'), ' ').alias('q')) 
+
+    df1.show()
+    +---+----------+----------+-----+-----+                                         
+    |id_|        d1|        d2| flag|    q|
+    +---+----------+----------+-----+-----+
+    |  1|2018-09-26|2018-10-26|false|    A|
+    |  2|2018-06-21|2018-06-27|false|    B|
+    |  2|2018-06-27|2018-07-02|false|  C B|
+    |  2|2018-07-02|2018-07-07|false|C B A|
+    |  2|2018-07-07|2018-07-19| true|  B A|
+    |  2|2018-07-19|2019-02-27| true|    A|
+    |  2|2019-02-27|2019-03-28| true|     |
+    |  2|2019-03-28|2019-06-25|false|    A|
+    +---+----------+----------+-----+-----+
+    
+
+For df1, if q == '', there is a gap which should be removed.
+the boundaries of each drange is defined based on flag, next_flag, next_d1
+as discussed in the comments:
+
+pesudo-code to show the logic how/when to adjust d1/d2:
+
+    flag = (if d1 is from original_d2) ? true : false
+    both next_d1 and next_flag defined on WindowSpec-w1
+
+    # for df1.d1: if flag is true, add 1 day, otherwise keep as-is
+    d1 = IF(flag, date_add(d1,1), d1)
+    
+    # for df1.d2: keep as-is when has gap with the next row or next_flag is true, else minus 1 day
+    d2 = IF((next_d1 != d2) or next_flag, d2, date_sub(d2,1))
+
+Actual code:
+
+    # WindowSpec to calculate next_d1
+    w1 = Window.partitionBy('id_').orderBy('d1')
+
+    # filter out gaps and calculate next_d1 and the adjusted d2
+    df_new = df1.where('q!= ""') \
+                .withColumn('next_d1', lead('d1').over(w1)) \
+                .withColumn('next_flag', coalesce(lead('flag').over(w1), lit(True))) \
+                .selectExpr(
+                        'id_'
+                      , 'q'
+                      , 'IF(flag, date_add(d1,1), d1) AS d1'
+                      , 'IF((next_d1 != d2) or next_flag, d2, date_sub(d2,1)) AS d2'
+                 ) 
+
+    df_new.show()
+    +---+-----+----------+----------+                                               
+    |id_|    q|        d1|        d2|
+    +---+-----+----------+----------+
+    |  1|    A|2018-09-26|2018-10-26|
+    |  2|    B|2018-06-21|2018-06-26|
+    |  2|  C B|2018-06-27|2018-07-01|
+    |  2|C B A|2018-07-02|2018-07-07|
+    |  2|  B A|2018-07-08|2018-07-19|
+    |  2|    A|2018-07-20|2019-02-27|
+    |  2|    A|2019-03-28|2019-06-25|
+    +---+-----+----------+----------+
+
