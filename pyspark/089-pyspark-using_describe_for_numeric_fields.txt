@@ -1,0 +1,64 @@
+https://stackoverflow.com/questions/58066235/is-there-a-way-to-filter-numeric-columns-in-a-spark-df-and-apply-count-and-mean
+
+    from pyspark.sql.functions import col
+    import pandas as pd
+
+    df = spark.createDataFrame([ (1, 12.3, 1.5, 'test', 13.23) ], ['i1', 'd2', 'f3', 's4', 'd5'])
+
+
+    # string columns:
+    str_cols = [ c[0] for c in df.dtypes if c[1] == 'string' ]
+
+    df1 = df.describe()
+
+    df1 = df1.select([ col(c) for c in df1.columns if c not in str_cols ]).toPandas()
+    #  summary   i1        d2   f3         d5
+    #0   count    1         1    1          1
+    #1    mean  1.0  12.30000  1.5  13.230000
+    #2  stddev  NaN       NaN  NaN        NaN
+    #3     min    1      12.3  1.5      13.23
+    #4     max    1      12.3  1.5      13.23
+
+    s_dtype = pd.Series(dict([ c for c in df.dtypes if c[0] in df1.columns] + [('summary', 'dtype')] ))
+    #i1                bigint
+    #d2         decimal(10,1)
+    #f3                double
+    #d5         decimal(10,2)
+    #summary            dtype
+    #dtype: object
+
+    df1.append(s_dtype, ignore_index=True).set_index('summary').T
+    #summary count       mean stddev    min    max          dtype
+    #i1          1        1.0    NaN      1      1         bigint
+    #d2          1   12.30000    NaN   12.3   12.3  decimal(10,1)
+    #f3          1        1.5    NaN    1.5    1.5         double
+    3d5          1  13.230000    NaN  13.23  13.23  decimal(10,2)
+
+Another similar question:
+using df.describe() and df.dtypes to find all numeric columns:
+https://stackoverflow.com/questions/58075048/separate-numerical-and-categorical-variable-in-pandas-datframe/58079396#58079396
+
+    from datetime import datetime
+    df = spark.createDataFrame([ (1, 12.3, 1.5, 'test', 13.23, datetime(2019,9,23)) ], ['i1', 'd2', 'f3', 's4', 'd5', 'dt'])
+    # DataFrame[i1: bigint, d2: double, f3: double, s4: string, d5: double, dt: timestamp]
+    
+    # find all numeric and string columns from df (remove the first column which is `summary`)
+    cols = df.limit(100).describe().columns[1:]
+    # ['i1', 'd2', 'f3', 's4', 'd5'] 
+    
+    # get a mapping of column vs dtypes of the df:
+    dtype_mapping = dict(df.dtypes)
+    #{'d2': 'double',
+    # 'd5': 'double',
+    # 'dt': 'timestamp',
+    # 'f3': 'double',
+    # 'i1': 'bigint',
+    # 's4': 'string'}
+    
+    # filter out string-type from cols using the above mapping:
+    numeric_cols = [ c for c in cols if dtype_mapping[c] != 'string' ]
+    # ['i1', 'd2', 'f3', 'd5']
+    
+
+
+
