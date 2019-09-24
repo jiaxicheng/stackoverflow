@@ -10,7 +10,7 @@ Setup the data:
     
     from pyspark.sql import Window
     from pyspark.sql.functions import (lead, expr, to_date, collect_set, array_sort
-         , array_join, broadcast, lit, concat, coalesce)
+         , array_join, broadcast, lit, concat, coalesce, struct)
     
     df = spark.createDataFrame([
           (1, 'A', '2018-09-26', '2018-10-26') 
@@ -20,6 +20,16 @@ Setup the data:
         , (2, 'A', '2019-03-28', '2019-06-25') 
       ], ['id_', 'p', 'd1', 'd2'])
 
+    """ original df, just convert d1 and d2 from StringType() to DateType()"""
+    df = df.withColumn('d1', to_date('d1')).withColumn('d2', to_date('d2'))
+
+    df.printSchema()
+    root
+     |-- id_: long (nullable = true)
+     |-- p: string (nullable = true)
+     |-- d1: date (nullable = true)
+     |-- d2: date (nullable = true)
+
 Create a new df_drange containing all distinct dates from d1 and d2,
 plus a flag which list as `1` when it's from d2 and `0` otherwise
 sort them and segement them into interval date ranges and split
@@ -27,18 +37,20 @@ the fields d1, d2, flag(d1 only) and convert them into proper DataType()
 
 Note: flag is to identify if df_drange.d1 is from the d2 in the original dataframe
 
-    df_drange = df.select('id_', 'd1', lit(0).alias('flag')).union(df.select('id_', 'd2', lit(1))) \
+    df_drange = df.select('id_', col('d1').alias('date'), lit(False).alias('flag')).union(
+             df.select('id_', 'd2', lit(True))
+         ) \
         .groupby('id_') \
-        .agg(array_sort(collect_set(concat('d1', lit('-'), 'flag'))).alias('dates')) \
+        .agg(array_sort(collect_set(struct('date', 'flag'))).alias('dates')) \
         .withColumn('dates', expr("""
              explode(transform(sequence(0, size(dates)-2), i -> named_struct('d1', dates[i], 'd2', dates[i+1])))
            """)) \
         .selectExpr(
              'id_'
-           , "to_date(substring_index(dates.d1, '-', 3)) as d1"
-           , "to_date(substring_index(dates.d2, '-', 3)) as d2"
-           , "boolean(substring_index(dates.d1, '-', -1)) as flag"
-         ).where('d1 != d2')
+           , 'dates.d1.date as d1'
+           , 'dates.d2.date as d2'
+           , 'dates.d1.flag as flag'
+         )
 
     df_drange.orderBy('id_','d1').show()
     +---+----------+----------+-----+                                               
@@ -61,26 +73,16 @@ Note: flag is to identify if df_drange.d1 is from the d2 in the original datafra
      |-- d2: date (nullable = true)
      |-- flag: boolean (nullable = true)
 
-    """ original df, just convert d1 and d2 from StringType() to DateType()"""
-    df2 = df.withColumn('d1', to_date('d1')).withColumn('d2', to_date('d2'))
-
-    df2.printSchema()
-    root
-     |-- id_: long (nullable = true)
-     |-- p: string (nullable = true)
-     |-- d1: date (nullable = true)
-     |-- d2: date (nullable = true)
-
 Left join with the original df and for each id_ with any overlapping
 between (d1, d2) of df_dranges and (d1, d2) of the original df
 groupby the (id_, d1, d2, flag) from df_drange and get the array_join(collect_set(p), ' ')
 broadcast join is added for df_drange:
 
     df1 = broadcast(df_drange).join(
-          df2
-        , (df2.id_ == df_drange.id_) & (
-                ((df2.d1 < df_drange.d2) & (df2.d2 > df_drange.d1))
-              | ((df_drange.d1 == df_drange.d2) & df_drange.d1.between(df2.d1, df2.d2))
+          df
+        , (df.id_ == df_drange.id_) & (
+                ((df.d1 < df_drange.d2) & (df.d2 > df_drange.d1))
+              | ((df_drange.d1 == df_drange.d2) & df_drange.d1.between(df.d1, df.d2))
           )
         , how = 'left'
     ).groupby(df_drange.id_, df_drange.d1, df_drange.d2, df_drange.flag) \
