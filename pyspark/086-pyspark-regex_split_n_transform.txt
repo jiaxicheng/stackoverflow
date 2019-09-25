@@ -74,6 +74,7 @@ Some notes:
 
  (4) difference between array_except and array_remove:
      array_except(arr, F.array(lit(''), 'x')): remove more than one values from `arr`
+     **Note:** using array_except with caution since it also drop duplicates in the left array
      array_rempve(arr, ''): remove all '' from `arr` (only one value)
 
 #####
@@ -106,4 +107,54 @@ if only want to find the first and last index of each unique character in the St
 
 #####
 Questions: How to quickly check if a String containg only a single character in SparkSQL
+Method-1: use regexp_replace the first char with EMPTY,the result is EMPTY if all same chars
+
+    regexp_replace(x, left(x,1), '') == ''
+
+
+Method-2: use split and take the size of array_distinct(). Note split by EMPTY will generate 
+          an extra EMPTY string element)
+
+    size(array_distinct(split(x,""))) == 2  
+
+
+Method-3: repeat the first char the length(`x`) times to see if it equals to `x`
+
+    repeat(left(x,1), length(x)) == x
+
+
+One more Example:
+https://stackoverflow.com/questions/58085157/how-can-i-convert-a-input-string-into-dictionary-for-each-rows-of-a-column-in-py
+
+from pyspark.sql.functions import udf, to_json
+import re
+
+# argument `x` is a StringType() over the udf function
+# return `row` as a list of dicts
+@udf('array<struct<startIndex:long,endIndex:long,flag:string>>')
+def set_fields(x):
+    row = []
+    for m in re.finditer(r'(.)\1*', x):
+        row.append({
+            'startIndex': m.start()
+          , 'endIndex': m.end()-1
+          , 'flag': m.group(1)
+        })
+    return row
+
+if __name__ == "__main__":
+
+    df = spark.createDataFrame([
+          ('01', 'AABBBAA') 
+        , ('02', 'SSSAAAA') 
+      ] , ['id', 'Values']
+    )
+
+    df.select('id', to_json(set_fields('Values')).alias('Values')).show(truncate=False)    
+    #+---+----------------------------------------------------------------------------------------------------------------------------+
+    #|id |Values                                                                                                                      |
+    #+---+----------------------------------------------------------------------------------------------------------------------------+
+    #|01 |[{"startIndex":0,"endIndex":1,"flag":"A"},{"startIndex":2,"endIndex":4,"flag":"B"},{"startIndex":5,"endIndex":6,"flag":"A"}]|
+    #|02 |[{"startIndex":0,"endIndex":2,"flag":"S"},{"startIndex":3,"endIndex":6,"flag":"A"},{"startIndex":8,"endIndex":9,"flag":"D"}]|
+    #+---+----------------------------------------------------------------------------------------------------------------------------+
 
