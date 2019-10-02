@@ -38,7 +38,12 @@ In the following example, df1.score_list column contains an array of structs, se
 
     >>> df1.selectExpr(
             "name"
-          , "array_join(transform(score_list, x -> concat('(', x.subject, ', ', x.score, ')')), ' | ') AS score_list"
+          , """
+             array_join(
+                 transform(score_list, x -> concat('(', x.subject, ', ', x.score, ')'))
+               , ' | '
+             ) AS score_list
+            """
     ).show(2,0)
     +----+--------------------------+                                               
     |name|score_list                |

@@ -1,5 +1,7 @@
 https://stackoverflow.com/questions/56931256/how-to-explode-multiple-columns-different-types-and-different-lengths
 
+Method-1: Using String functions: array_join, regexp_replace and split
+
 Setup
 
     df = spark.createDataFrame([ Row(a=1, b=[1, 2, 3, 4, 5, 6], c=['11', '22', '33'], d=['foo'], e=[111,222]) ])
