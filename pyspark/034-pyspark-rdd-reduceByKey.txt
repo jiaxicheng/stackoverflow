@@ -1,0 +1,65 @@
+https://stackoverflow.com/questions/56895694/group-by-key-value-pyspark
+
+"""RDD methods to do the map-reduce tasks
+"""
+    from operator import add
+
+    # initialize the RDD
+    rdd = sc.parallelize([(u'"COUNTRY"', u'"GYEAR"', u'"PATENT"')
+        , (u'"BE"', u'1963', u'3070801')
+        , (u'"BE"', u'1964', u'3070811')
+        , (u'"US"', u'1963', u'3070802')
+        , (u'"US"', u'1963', u'3070803')
+        , (u'"US"', u'1963', u'3070804')
+        , (u'"US"', u'1963', u'3070805')
+        , (u'"US"', u'1964', u'3070807')])
+
+Do the following:
+
+1. use filter to remove the header
+2. set the tuple of **`(COUNTRY, GYEAR)`** as key, **`1`** as value 
+3. count the keys with reduceByKey(add)
+4. adjust the key to **`COUNTRY`**, value to **`[(GYEAR, cnt)]`** where **cnt** is calculated from the previous reduceByKey
+5. run `reduceByKey(add)` to merge the list with the same key(`COUNTRY`).
+
+        rdd_new = rdd.map(lambda x: ((x[0], x[1]),1) ) \
+                     .reduceByKey(add) \
+                     .map(lambda x: (x[0][0], [(x[0][1], x[1])])) \
+                     .reduceByKey(add) \
+                     .filter(lambda x: x[0] != '"COUNTRY"')
+
+Check the result:
+
+    >>> rdd_new.take(2)
+    [(u'"US"', [(u'1964', 1), (u'1963', 4)]),
+     (u'"BE"', [(u'1963', 1), (u'1964', 1)])]
+
+
+Another way using mapValues + itertools.groupby
+
+        rdd.map(lambda x: (x[0], [x[1]])) \
+           .reduceByKey(add) \
+           .mapValues(lambda x: [ (k, len(list(g))) for (k,g) in groupby(sorted(x)) ]) \
+           .collect()
+
+    [(u'"US"', [(u'1963', 4), (u'1964', 1)]),
+     (u'"BE"', [(u'1963', 1), (u'1964', 1)]),
+     (u'"COUNTRY"', [(u'"GYEAR"', 1)])]
+
+
+
+Another example:
+https://stackoverflow.com/questions/58191952/reducing-values-in-lists-of-key-val-rdds-given-these-lists-are-values-in-an
+
+use mapValues() + itertools.groupby():
+
+    from itertools import groupby
+
+    data.mapValues(lambda x: [ (k, sum(f[1] for f in g)) for (k,g) in groupby(sorted(x), key=lambda d: d[0]) ]) \
+        .collect()
+    #[(1, [('k1', 6), ('k2', 3)]), (2, [('k1', 6), ('k3', 9)])]
+    
+with itertools.groupby, we use the first item of the tuple as grouped-key k and sum the 2nd item from the tuple in each g.
+
+
+
