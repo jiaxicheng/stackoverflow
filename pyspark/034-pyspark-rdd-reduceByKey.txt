@@ -61,5 +61,16 @@ use mapValues() + itertools.groupby():
     
 with itertools.groupby, we use the first item of the tuple as grouped-key k and sum the 2nd item from the tuple in each g.
 
+For a large dataset, sorting is expensive, so it's better to define a function to handle the same w/o soring:
 
+    def merge_tuples(x):
+        d = {}
+        for (k,v) in x: 
+            d[k] = d.get(k,0) + v
+        return d.items()
+
+    data.mapValues(merge_tuples).collect()
+
+Notes: in a realtime application, writting up a separate function and making the code more readable and
+       adding try-except-finally block to handle exceptions properly.
 
