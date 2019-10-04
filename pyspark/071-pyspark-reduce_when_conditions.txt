@@ -1,0 +1,38 @@
+https://stackoverflow.com/questions/57517381/how-do-i-use-multiple-conditions-with-pyspark-sql-funtions-when-from-a-dict
+
+use **reduce()**:
+
+    from pyspark.sql.functions import when, col
+    from functools import reduce
+
+    df = spark.createDataFrame([
+            (1, 'Y', 'N')
+          , (2, 'Y', 'Y')
+          , (3, 'N', 'N')
+        ], ['id', 'employed', 'athlete']
+    )
+
+    # dictionary column names and their corresponding qualified values 
+    d = {
+      'employed': 'Y',
+      'athlete': 'N'
+    }
+
+    # set up condition with reduce() function
+    cond = reduce(lambda x,y: x&y, [ col(c) == v for c,v in d.items() if c in df.columns ])
+    print(cond)
+    # Column<((employed = Y) AND (athlete = N))>
+
+    # set up new columns with the above `cond`
+    df.withColumn("call_person", when(cond, "Y").otherwise("N")).show()
+    +---+--------+-------+-----------+
+    | id|employed|athlete|call_person|
+    +---+--------+-------+-----------+
+    |  1|       Y|      N|          Y|
+    |  2|       Y|      Y|          N|
+    |  3|       N|      N|          N|
+    +---+--------+-------+-----------+
+
+
+This is a very typical use cases, another example:
+https://stackoverflow.com/questions/58126939/how-to-dynamically-filter-out-rows-in-a-spark-dataframe-with-an-exact-match/
