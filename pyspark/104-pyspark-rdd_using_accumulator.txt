@@ -1,0 +1,53 @@
+Use Accumulator:
+
+
+Example-1: Use a list as Accumulator:
+---
+    In this example, we want to get all filenames which got exception during the function call
+    Use ListAccumulator to record the filenames.
+    ---
+    + Below use x[2] to mimic the filename, and the function return error when there is less than 6 
+      items in the tuple.
+
+    REF: https://stackoverflow.com/questions/58303866/handeling-errors-in-flatmap-on-rdd-pyspark-python
+
+    rdd = sc.parallelize([
+        (25513016, 100, '5GDSMSPR8ZK3B', '1')
+      , (25513016, 102, '4SHSMSPR8ZK3B', '2', '2019-09-27 13.29.27', 'DEBRVTM')
+      , (25513016, 103, '7RAKOSPR8ZK3B', '3', '2019-09-27 13.29.27')
+      , (25513016, 119, '8J6PMSPR8ZK3B', '1', '2019-09-27 13.29.27', 'DKAARPT')
+    ])
+
+
+    """extend AccumulatorParam class to use List as an accumulator"""
+    class ListAccumulatorParam(AccumulatorParam):
+        def zero(self, v):
+            return []
+        def addInPlace(self, acc1, acc2):
+            return acc1 + acc2
+
+    """Set up accumulator"""
+    error_files = sc.accumulator([], ListAccumulatorParam())
+
+    """define function and update accumulator when any except happens"""
+    def readByteUFF(x):
+        try:
+            return (x[0], x[2], x[5])
+        except:
+            global error_files
+            error_files += [x[2]]
+            return None
+
+    """do regular trsnaformation"""
+    rdd.map(readByteUFF).filter(bool).collect()                                                                        
+    #[(25513016, '4SHSMSPR8ZK3B', 'DEBRVTM'),
+    # (25513016, '8J6PMSPR8ZK3B', 'DKAARPT')]
+
+    if error_files.value:
+        print('\n'.join(error_files.value))    
+    #5GDSMSPR8ZK3B
+    #7RAKOSPR8ZK3B
+
+    del error_files
+
+
