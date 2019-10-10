@@ -1,0 +1,72 @@
+https://stackoverflow.com/questions/58238563/write-spark-dataframe-as-array-of-json-pyspark
+
+This is a question which has been asked more than twice at stackoverflow in the past 1-2 months
+
+Method-1: using df.foreachPartition(f)
+
+The function takes an iterator as argument which iterates all Row objects in the same partition.
+This method can give you flexibility to handle files in pure Python codes.
+
+ + use uuid.uuid4() to generate random filename in destination S3 bucket 
+ + use a list comprehension to convert all Rows into a list of Row objects as dictionary
+ + use json.dumps to convert the above list into a JSON string
+ + use io.StringIO to convert the above string into a file-object
+ + use s3.upload_fileobj to upload StringIO to S3 bucket, using uuid.uuid4() to generate key_name in bucket.
+
+    import numpy as np
+    import pandas as pd
+
+    import boto3
+    from json import dumps
+    from io import StringIO
+    from uuid import uuid4
+
+    # save to local filesystem
+    def f_export_local(it):
+        path = '/home/xicheng/test/t2/{}'.format(uuid4())
+        with open(path, 'w') as fp:
+           dump([ row.asDict() for row in it ], fp)
+
+    # save to S3 bocket, not tested
+    def f_export_s3(it):
+        data = StringIO(dumps([ row.asDict() for row in it ]))
+        s3 = boto3.client('s3')
+        s3.upload_fileobj(data, 'bucker-name', str(uuid4()))
+
+    # create dataframe
+    df = spark.createDataFrame(pd.DataFrame({'x': np.random.rand(100), 'y': np.random.rand(100)}))
+
+    df.repartition(5).foreachPartition(f_export_s3)
+
+
+Some notes:
+ (1) differences between upload_file and put_object:
+     + upload_file: handled by the S3 Transfer Manager, automatically handle multipart uploads behind the scences
+     + put_object : map directly to the low-level S3 API request, does not handle multipart uploads. 
+                    try to send the entire body in one request
+ (2) upload_fileobj can use any file-like objects, for example io.StringIO
+     , upload_file requires a filename in the function argument
+
+References:
+---
+ [1] Amazon S3 boto3 API references:
+    + API functions: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html
+    + config       : https://boto3.amazonaws.com/v1/documentation/api/latest/guide/s3.html#uploads
+    + example      : https://zindilis.com/docs/aws/s3/upload-file-with-boto3.html
+ [2] Write file to HDFS:
+    + https://hdfs3.readthedocs.io/en/latest/quickstart.html
+    + https://wesmckinney.com/blog/python-hdfs-interfaces/
+
+
+
+Method-2: using DataFrame API functions, by pault@stackoverflow:
+
+    from pyspark.sql.functions import to_json, spark_partition_id, collect_list, col, struct
+
+    df.select(to_json(struct(*df.columns)).alias("json"))\
+        .groupBy(spark_partition_id())\
+        .agg(collect_list("json").alias("json_list"))\
+        .select(col("json_list").cast("string"))\
+        .write.text("s3://path/to/json")
+
+
