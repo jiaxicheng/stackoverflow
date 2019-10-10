@@ -1,0 +1,31 @@
+
+https://stackoverflow.com/questions/58330928/how-split-between-number-pyspark-or-nlp/58332005#58332005
+
+Split sentences or paragraphs into words for tokenizations.
+
+    df = spark.createDataFrame([('Cras mattis MP the -69661/69662;69663 /IS4567',)], ['s'])
+
+Method-1: using SparkSQL's builtin functions sentences() and flatten() [need spark 2.40+ for flatten()]
+
+    df.selectExpr('s', 'flatten(sentences(s)) as new_s').show(truncate=False)                                        
+    #+---------------------------------------------+----------------------------------------------------+
+    #|s                                            |new_s                                               |
+    #+---------------------------------------------+----------------------------------------------------+
+    #|Cras mattis MP the -69661/69662;69663 /IS4567|[Cras, mattis, MP, the, 69661, 69662, 69663, IS4567]|
+    #+---------------------------------------------+--------------------------------
+
+Method-2: using regexp_replace + split:
+
+    df.select(split(regexp_replace(regexp_replace('s', r'^\W+|\W+$', ''),'\W+', '\0'),'\0').alias('new_s')) \
+      .show(truncate=False)
+    #+----------------------------------------------------+
+    #|new_s                                               |
+    #+----------------------------------------------------+
+    #|[Cras, mattis, MP, the, 69661, 69662, 69663, IS4567]|
+    #+----------------------------------------------------+
+
+   Explanations:
+     (1) inside regexp_replace to remove all leading and trailing non-words characters
+     (2) outter regexp_replace to replace all consecutive non-word chars `\W+` with NULL char `\0`
+     (3) split the above string with NULL char `\0`
+
