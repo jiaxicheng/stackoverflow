@@ -1,0 +1,70 @@
+https://stackoverflow.com/questions/58374594/spark-join-best-match-efficiency-issues
+
+Samilar to Pandas merge_asof(), after setting up a flag and union two dataframe, the
+problems can be divided into two common issues with pyspark:
+(1) setting up a subgroup-label to identify consecutive Rows satisfying 
+    certain condition. Similar to the FAQ-questions: using shift+cumsum
+    we use Window function lag+sum to handle the same
+(2) fillna(): forward-fill using Window function: last
+    Example: https://stackoverflow.com/questions/36343482
+
+
+Example data on docker@madison:
+
+    df_1 = spark.read.csv('file:///home/xicheng/test/merge_asof-1-1.txt', header=True)
+    df_2 = spark.read.csv('file:///home/xicheng/test/merge_asof-1-2.txt', header=True)
+
+    from pyspark.sql.functions import sum as _sum, when, last, col, lag
+
+(1) create a new dataframe with a flag to identify source of Rows (1 to df_2 and 0 to df_1) 
+
+    df = df_2.selectExpr('col1', 'col2', 'col3', 'col4', '1 as flag').union(
+         df_1.selectExpr('col1', 'col2', 'col3', 'Null', '0 as flag'))
+
+    df.sort('col1','col2','col3','flag').show()                                                                         
+    +----+----+-----+----+----+
+    |col1|col2| col3|col4|flag|
+    +----+----+-----+----+----+
+    |   a|   b|    a|  90|   1|
+    |   a|   b|   ab| 100|   1|
+    |   a|   b|  abc| 150|   1|
+    |   a|   b|abcde|null|   0|
+    |   a|   c|  abc|  90|   1|
+    +----+----+-----+----+----+
+
+
+(2) add a subgroup-label `g` to gruop all Rows that have the same sequence of 
+    current_col4.startwwith(prev_col4) [a FAQ issue using Window function:lag+sum]
+
+    w1 = Window.partitionBy('col1','col2').orderBy('col3')
+    df1 = df.withColumn('g', _sum(when(col('col3').startswith(lag('col3').over(w1)),0).otherwise(1)).over(w1))
+
+(3) For each partition of ('col1','col2','g'), sort the data by ('col3','flag') 
+    (add col4 in orderBy in case there are ties with col3 but different values of col4)
+    this becomes another FAQ ffill() issue (forward fill NA values) using Window function:last
+
+    w2 = Window.partitionBy('col1','col2','g').orderBy('col3','flag')
+
+    df2 = df1.withColumn('col4', last('col4', True).over(w2)) 
+
+    df2.sort('col1','col2','col3','flag').show()
+    +----+----+-----+----+----+---+--------+                                        
+    |col1|col2| col3|col4|flag|  g|col4_new|
+    +----+----+-----+----+----+---+--------+
+    |   a|   b|    a|  90|   1|  1|      90|
+    |   a|   b|   ab| 100|   1|  1|     100|
+    |   a|   b|  abc| 150|   1|  1|     150|
+    |   a|   b|abcde|null|   0|  1|     150|
+    |   a|   c|  abc|  90|   1|  1|      90|
+    +----+----+-----+----+----+---+--------+
+
+(4) filter the result:
+
+    df_new = df2.filter('flag == 0').drop('flag', 'g')
+    +----+----+-----+----+                                                          
+    |col1|col2| col3|col4|
+    +----+----+-----+----+
+    |   a|   b|abcde| 150|
+    +----+----+-----+----+
+
+
