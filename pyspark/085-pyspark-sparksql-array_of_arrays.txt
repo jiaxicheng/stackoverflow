@@ -1,0 +1,94 @@
+https://stackoverflow.com/questions/58224297/how-can-i-implement-an-iterative-optimization-problem-in-spark
+
+similar to 085-pyspark-sparksql-named_struct.txt, which uses an array of named_structs, this example
+uses an array of arrays.
+https://github.com/jiaxicheng/stackoverflow/blob/master/pyspark/085-pyspark-sparksql-named_struct.txt
+
+Dataframes:
+
+    df_rollup.show()
+    +-----+--------+------------------+--------+
+    |owner|category|alternate_category|quantity|
+    +-----+--------+------------------+--------+
+    |  ABC|       1|                 4|      50|
+    |  ABC|       2|                 3|      25|
+    |  ABC|       3|                 2|      15|
+    |  ABC|       4|                 1|      10|
+    +-----+--------+------------------+--------+
+
+    df_actual.show()
+    +-----+--------+----------+--------+
+    |owner|category|product_id|quantity|
+    +-----+--------+----------+--------+
+    |  ABC|       1|       123|      30|
+    |  ABC|       2|       456|      20|
+    |  ABC|       3|       789|      20|
+    |  ABC|       4|       012|      30|
+    +-----+--------+----------+--------+
+
+
+Join the Dataframes
+
+create a new df_mapping to map category and product_id and then join df_rollup, df_actual, df_mapping into df1, see below:
+
+    from pyspark.sql.functions import col, expr, explode
+
+    df_mapping = df_actual.selectExpr('owner', 'category as alternate_category', 'product_id as alt_product_id')
+
+    df1 = df_rollup.join(
+          df_actual.withColumnRenamed('quantity', 'quantity_actual')
+        , on=['owner', 'category']
+    ).join(df_mapping, on=['owner', 'alternate_category']) 
+
+    >>> df1.show()
+    +------------------+-----+--------+--------+----------+---------------+--------------+
+    |alternate_category|owner|category|quantity|product_id|quantity_actual|alt_product_id|
+    +------------------+-----+--------+--------+----------+---------------+--------------+
+    |                 4|  ABC|       1|      50|       123|             30|           012|
+    |                 3|  ABC|       2|      25|       456|             20|           789|
+    |                 2|  ABC|       3|      15|       789|             20|           456|
+    |                 1|  ABC|       4|      10|       012|             30|           123|
+    +------------------+-----+--------+--------+----------+---------------+--------------+
+
+
+Calculate a new field `arr` using Spark SQL syntax, with the following logic:
+
+* if quantity_actual < quantity, we split the records into an array of two arrays
+
+   * one with the actual product_id and quantity_actual
+   * another with the alt_product_id and (quantity - quantity_actual)
+
+* otherwise, return one array of `product_id` and `quantity_rollup`
+
+Then we explode the above array into rows and select fields as required
+
+
+    df_new = df1.withColumn('arr', expr('''
+    
+        IF(quantity_actual < quantity
+          , array(
+                  array(product_id, quantity_actual)
+                , array(alt_product_id, quantity - quantity_actual)
+            )     
+          , array(
+                 array(product_id, quantity)
+            )
+        )
+    
+    ''')).withColumn('prod_quant', explode('arr')) \
+         .selectExpr('owner', 'category', 'prod_quant[0] as product_id', 'prod_quant[1] as quantity')
+    
+    >>> df_new.show()
+    +-----+--------+----------+--------+
+    |owner|category|product_id|quantity|
+    +-----+--------+----------+--------+
+    |  ABC|       1|       123|      30|
+    |  ABC|       1|       012|      20|
+    |  ABC|       2|       456|      20|
+    |  ABC|       2|       789|       5|
+    |  ABC|       3|       789|      15|
+    |  ABC|       4|       012|      10|
+    +-----+--------+----------+--------+
+    
+Notes: this works only when category to product_id is one-to-one mapping, if not, will have to clarify the logic.
+    
