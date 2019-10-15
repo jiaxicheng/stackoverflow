@@ -2,7 +2,7 @@ Question
 
 https://stackoverflow.com/questions/57086759/how-to-get-a-list-column-with-values-of-multiple-columns-given-in-another-column
 
-For Spark 2.40+, use the builtin SQL function transform():
+For Spark 2.4.0+, use the builtin SQL function transform():
 
 Data Setup
 ----------

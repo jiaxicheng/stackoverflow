@@ -5,7 +5,7 @@ Split sentences or paragraphs into words for tokenizations.
 
     df = spark.createDataFrame([('Cras mattis MP the -69661/69662;69663 /IS4567',)], ['s'])
 
-Method-1: using SparkSQL's builtin functions sentences() and flatten() [need spark 2.40+ for flatten()]
+Method-1: using SparkSQL's builtin functions sentences() and flatten() [need spark 2.4.0+ for flatten()]
 
     df.selectExpr('s', 'flatten(sentences(s)) as new_s').show(truncate=False)                                        
     #+---------------------------------------------+----------------------------------------------------+

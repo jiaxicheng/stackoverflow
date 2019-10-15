@@ -46,7 +46,7 @@ Method-1: Window function, sum and RangeBetween
     +------+-----+----------+------------------+
 
 
-Method-2: use Interval and Spark SQL Syntax(**tested on Spark 2.40**)
+Method-2: use Interval and Spark SQL Syntax(**tested on Spark 2.4.0**)
 
     stmt = '''
          SUM(Amount) OVER ( 

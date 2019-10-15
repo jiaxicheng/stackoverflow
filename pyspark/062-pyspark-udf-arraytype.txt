@@ -85,7 +85,7 @@ df.select(F.explode(udf_find_route(F.array(cols))).alias('c1')) \
     
 
 #################################
-Method-2: Only for Spark 2.40+, use SparkSQL builtin functions:
+Method-2: Only for Spark 2.4.0+, use SparkSQL builtin functions:
 
     cols = df.columns
 

@@ -7,7 +7,7 @@ Note:
  + this potentially means that a solution used to need a list comprehension 
    can also be implemented with transform(array(...), x -> func(c))
 
-With Spark 2.40+, this task can be much easier with the Spark SQL builtin function: transform()
+With Spark 2.4.0+, this task can be much easier with the Spark SQL builtin function: transform()
 
     from pyspark.sql.functions import split, expr, col
 

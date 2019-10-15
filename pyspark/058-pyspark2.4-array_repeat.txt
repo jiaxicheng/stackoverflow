@@ -3,7 +3,7 @@ https://stackoverflow.com/questions/50624745/pyspark-how-to-duplicate-a-row-n-ti
 
 Repeat rows based on a column-value:
 
-With **Spark 2.40+**, this can be handled with builtin functions: **array_repeat** + **explode**:
+With **Spark 2.4.0+**, this can be handled with builtin functions: **array_repeat** + **explode**:
 
     from pyspark.sql.functions import expr
     

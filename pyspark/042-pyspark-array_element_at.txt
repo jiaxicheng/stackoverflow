@@ -2,7 +2,7 @@ https://stackoverflow.com/questions/40467936/how-do-i-get-the-last-item-from-a-l
 
 To get the last element from an array column:
 
-For Spark 2.40+, use pyspark.sql.functions.element_at, see below from the documentation:
+For Spark 2.4.0+, use pyspark.sql.functions.element_at, see below from the documentation:
 
     element_at(array, index) - Returns element of array at given (1-based) index. 
     If index < 0, accesses elements from the last to the first. 
