@@ -1,0 +1,60 @@
+https://stackoverflow.com/questions/58441790
+
+
+Steps:
+1. use `[:-]` to split the column hours into an array of 4 items (named h) and 
+   cast it into array of int (originally array of StringType)
+
+2. do math on the h
+
+    round(((h[2] - h[0] + IF(h[2]<h[0],24,0))*60 + h[3] - h[1])/60, 0)
+
+
+Method-1: Using pyspark
+
+    from pyspark.sql.functions import expr
+    
+    df.withColumn('h', expr('split(hours, "[-:]")').astype('array<int>')) \
+      .withColumn('h1', expr('''
+            h[2] - h[0] + IF(h[2]<h[0],24,0) + round((h[3]-h[1])/60,0)
+       ''').astype('int')) \
+      .show()
+    +----------+-----------+----------------+---+
+    |     bdate|      hours|               h| h1|
+    +----------+-----------+----------------+---+
+    |2019-10-17|    9:0-0:0|    [9, 0, 0, 0]| 15|
+    |2019-10-18|17:30-21:30|[17, 30, 21, 30]|  4|
+    +----------+-----------+----------------+---+
+
+
+Method-2: using SparkSQL
+
+Use CTE:
+
+    spark.sql(""" 
+        WITH v AS (SELECT bdate, hours, split(hours, "[-:]") AS h FROM tbl_df) 
+        SELECT bdate, hours, (h[2]-h[0] + IF(h[2]<h[0],24,0)) AS h1 FROM v 
+    """).show() 
+
+    +----------+-----------+----+
+    |     bdate|      hours|  h1|
+    +----------+-----------+----+
+    |2019-10-17|    9:0-0:0|15.0|
+    |2019-10-18|17:30-21:30| 4.0|
+    +----------+-----------+----+
+
+
+Example-2 using CTE:
+REF: https://stackoverflow.com/questions/58464636/58464881#58464881
+
+    df = spark.createDataFrame([(x,) for x in [10.0,61.0,3500.0,3600.0,3700.54,7000.22,7200.22,15000.55,86400.22]], ['Time']) 
+    df.createOrReplaceTempView('t_df')
+
+    spark.sql(""" 
+
+        WITH d AS (SELECT *, timestamp(unix_timestamp('2019-01-01 00:00:00') + Time) as Date FROM t_df) 
+        SELECT *, hour(d.Date) AS hour FROM d   
+
+    """).show(truncate=False) 
+
+
