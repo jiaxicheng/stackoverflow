@@ -1,0 +1,45 @@
+Some notes with Python regex:
+---
+
+
++ negative lookbehind 
+  + `(?<!ABC\s*)` invalid
+     + ERROR: java.util.regex.PatternSyntaxException: Look-behind group does not have an obvious maximum length near index 12
+  + `(?<!ABC{0,5})` fine with Pyspark, but not working with Python re module
+  + `(?<!ABC)` preprocess the text with regexp_replace('(?<=ABC)\s+', '')  
+  Notes: Java-based regex lookbehind support everything except '+' and '*'. The reason is
+         the engin needs to know how many chars to step back. Java-based regex on the 
+         other-hand just need to have a max bound to step back, thus `.{0,5}` will work
+         but `.*` or `.+` won't.
+         PySpark regex is Java-based engine.
+
+
+
++ unicode support:
+  + (?u), re.U or re.UNICODE will let \s, \b, \d, \D, \w, \S work locally
+  + pattern should be enclosed with ptn = ur'...'
+
+  (1) ERROR: UnicodeEncodeError: 'ascii' codec can't encode characters in position 435-436: ordinal not in range(128)
+      solution: 
+
+         import sys
+         # sys.setdefaultencoding() does not exist, here!
+         reload(sys)  # Reload does the trick!
+         sys.setdefaultencoding('UTF8')
+
+    ref: https://stackoverflow.com/questions/2276200/changing-default-encoding-of-python
+
+ 
+
++ Recursive patterns
+  (?R) or (?0): tries to match the entire regex recursively
+  (?1), (?2) try to match the relevant capture group
+
+   Example: https://stackoverflow.com/questions/39026120
+
+   this need another non-standard module: import regex
+
+
+
+
+
