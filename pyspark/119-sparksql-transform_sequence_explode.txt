@@ -1,0 +1,69 @@
+https://stackoverflow.com/questions/58492974/duplicate-rows-according-to-a-condition-with-explode-and-array
+
+For **Spark 2.4.0+**, you can use **[sequence][1]** + **[transform][2]** + explode to create new Rows with this task:
+
+    from pyspark.sql.functions import expr
+
+    df_new = (df
+        .withColumn('s_date', expr("last_day(to_date(StartDate, 'M/d/yyyy'))"))
+        .withColumn('e_date', expr("last_day(IFNULL(to_date(EndDate, 'M/d/yyyy'), add_months(current_date(),-1)))"))
+        .withColumn('EndOfTheMonth', expr('''
+              explode_outer(transform(
+                sequence(0, int(months_between(e_date, s_date))), i -> add_months(s_date,i)
+              ))
+         '''))
+        .withColumn('IsDeliveryOpen', expr("IF(e_date > EndOfTheMonth or EndDate is Null, 1, 0)"))
+    )
+
+    df_new.show()
+    +---------+---------+--------------+---------+------------+----------+----------+-------------+--------------+
+    |Reference|StartDate|StartTimestamp|  EndDate|EndTimestamp|    s_date|    e_date|EndOfTheMonth|IsDeliveryOpen|
+    +---------+---------+--------------+---------+------------+----------+----------+-------------+--------------+
+    |        1|8/15/2019|           SOD|9/18/2019|         EOD|2019-08-31|2019-09-30|   2019-08-31|             1|
+    |        1|8/15/2019|           SOD|9/18/2019|         EOD|2019-08-31|2019-09-30|   2019-09-30|             0|
+    |        2|8/16/2019|           SOD|8/23/2019|         EOD|2019-08-31|2019-08-31|   2019-08-31|             0|
+    |        3|6/17/2019|           SOD| 8/4/2019|         EOD|2019-06-30|2019-08-31|   2019-06-30|             1|
+    |        3|6/17/2019|           SOD| 8/4/2019|         EOD|2019-06-30|2019-08-31|   2019-07-31|             1|
+    |        3|6/17/2019|           SOD| 8/4/2019|         EOD|2019-06-30|2019-08-31|   2019-08-31|             0|
+    |        4| 8/1/2019|           SOD|     null|        null|2019-08-31|2019-09-30|   2019-08-31|             1|
+    |        4| 8/1/2019|           SOD|     null|        null|2019-08-31|2019-09-30|   2019-09-30|             1|
+    +---------+---------+--------------+---------+------------+----------+----------+-------------+--------------+
+
+    df_new = df_new.drop('s_date', 'e_date')
+
+**How it works:**
+
+1. convert *StartDate*, *EndDate* to DateType with the value to the last_day of the same month(*s_date*, *e_date*). if *EndDate* is NULL, then set its value to last_day of the previous month from the current_date
+
+2. calculate *# of months* between the above two dates and then create a sequence(0, #months) and transform it into an array of months(`EndOfTheMonth`) between StartDate and EndDate (inclusively)
+
+3. use explode_outer to generate Rows for all months in the above array
+
+4. calculate the IsDeliveryOpen flag accordingly. I removed `StartDate <= EndOfTheMonth` in your code since it's always true based on how *EndOfTheMonth* is calculated.
+
+**Note:** the above can also be written as one SQL statement:
+
+    df.createOrReplaceTempView('t_df')
+
+    spark.sql('''
+
+        WITH d AS (
+            SELECT *
+                 , last_day(to_date(StartDate, 'M/d/yyyy')) as s_date
+                 , last_day(IFNULL(to_date(EndDate, 'M/d/yyyy'),add_months(current_date(),-1))) as e_date
+            FROM t_df
+        )
+        SELECT d.*
+             , m.EndOfTheMonth
+             , IF(e_date > m.EndOfTheMonth or d.EndDate is NULL,1,0) AS IsDeliveryOpen
+        FROM d
+        LATERAL VIEW OUTER explode(
+            transform(sequence(0, int(months_between(e_date, s_date))), i -> add_months(s_date,i))
+        ) m AS EndOfTheMonth
+
+    ''').show()
+
+
+
+  [1]: https://spark.apache.org/docs/2.4.0/api/sql/index.html#sequence
+  [2]: https://spark.apache.org/docs/2.4.0/api/sql/index.html#transform
