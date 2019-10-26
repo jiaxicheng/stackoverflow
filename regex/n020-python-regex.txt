@@ -39,6 +39,17 @@ Some notes with Python regex:
 
    this need another non-standard module: import regex
 
++ NULL char
+  + in regex pattern class, use `\0` will yield the following ERROR:
+    Example:  regexp_replace('text', r'[^\0\s\w]+', '')  will yield:
+          <-- java.util.regex.PatternSyntaxException: Illegal octal escape sequence near index 4 [^\0\s\w]+
+    use `\x00` will be fine: 
+              regexp_replace('text', r'[^\x00\s\w]+', '')
+
+
++ Other simple notes:
+  (1) re.match() checks for a match only at the beginning of the string
+      re.search() checks for a match anywhere in the string
 
 
 
