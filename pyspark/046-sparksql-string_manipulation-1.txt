@@ -1,0 +1,42 @@
+https://stackoverflow.com/questions/58613681/mask-replace-inner-part-of-string-column-in-pyspark
+
+You can also do it without regex. after retrieving the position of '@' in the string, the rest of the task is actually just some simple math(with the Spark SQL functions CONCAT, LEFT, REPEAT and SUBSTR):
+
+    from pyspark.sql.functions import instr, expr
+
+    df = spark.createDataFrame(
+            [(e,) for e in ['abc123@gmail.com', '123abc123@yahoo.com', 'abd@gmail.com']]
+          , ['email_col']
+    ) 
+
+    # set N=2 as a parameter in the SQL expression
+    N = 2
+
+    df.withColumn('loc_at', instr('email_col', '@')) \
+      .withColumn('new_col', expr("""
+            CONCAT(LEFT(email_col,{0}), REPEAT('*', loc_at-2*{0}-1), SUBSTR(email_col, loc_at-{0}))
+       """.format(N))).show(truncate=False)
+    +-------------------+------+-------------------+
+    |email_col          |loc_at|new_col            |
+    +-------------------+------+-------------------+
+    |abc123@gmail.com   |7     |ab**23@gmail.com   |
+    |123abc123@yahoo.com|10    |12*****23@yahoo.com|
+    |abd@gmail.com      |4     |abbd@gmail.com     |
+    +-------------------+------+-------------------+
+
+**Note:** to handle email with the length of username less than 5 when N==2, just add
+       an IF() statement to the above SQL expression: 
+
+    IF(loc_at < 5
+       , CONCAT(LEFT(email_col,1), REPEAT('*', loc_at-3), SUBSTR(email_col, loc_at-1))
+       , CONCAT(LEFT(email_col,2), REPEAT('*', loc_at-5), SUBSTR(email_col, loc_at-2))
+    )
+
+    # result:
+    +-------------------+------+-------------------+
+    |email_col          |loc_at|new_col            |
+    +-------------------+------+-------------------+
+    |abc123@gmail.com   |7     |ab**23@gmail.com   |
+    |123abc123@yahoo.com|10    |12*****23@yahoo.com|
+    |abd@gmail.com      |4     |a*d@gmail.com      |
+    +-------------------+------+-------------------+
