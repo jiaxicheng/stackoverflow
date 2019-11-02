@@ -1,0 +1,56 @@
+https://stackoverflow.com/questions/58667273/spark-read-csv-does-not-ignore-separator-character-inside-quotes
+
+When CSV reader can not handle the complext delimiters. This method only applied to multiLine=False
+
+regex pattern used in this task:
+---
+(                  # start of $1
+  (?:              # start of non-capturing group
+    "[^"]*"        # sub-string enclosed by "
+      |            # alternation 
+    [^|"]+         # any characters except pipe and double-quote
+  )+               # one more more repeats of any items from the non-capturing group
+)                  # end of $1
+(?:\||$)
+
+
+    from pyspark.sql.functions import regexp_replace, split, size, col
+
+    # read the file into one column dataframe
+    df = spark.read.csv('/home/xicheng/test/read-1.txt', sep='\n', header=True)
+
+    # retrieve the column names
+    cols = df.columns[0].split('|') 
+
+    # regex pattern to find a field in $1
+    ptn = r'((?:"[^"]*"|[^|"]+)+)(?:\||$)'
+
+    # check the data split, the last item is always EMPTY which can be ignored
+    (df.select(
+          df.columns[0]
+        , split(regexp_replace(df.columns[0], ptn, '$1\0'),'\0').alias('t1')
+       ) 
+      .withColumn('s1', size('t1'))
+      .show(truncate=False)
+    )
+    #+---------------------------------------------------+---------------------------------------------------------+---+
+    #|A|B|C                                              |t1                                                       |s1 |
+    #+---------------------------------------------------+---------------------------------------------------------+---+
+    #|AAAA|BBBB|CCCC                                     |[AAAA, BBBB, CCCC, ]                                     |4  |
+    #|A"||114|WWWW|CC|BBBBB|AAAF||"ZZZZ FFFF             |[A"||114|WWWW|CC|BBBBB|AAAF||"ZZZZ FFFF, ]               |2  |
+    #|"||114|WWWW|CC|BBBBB|AAAF||"ZZZZ FFFF              |["||114|WWWW|CC|BBBBB|AAAF||"ZZZZ FFFF, ]                |2  |
+    #|A"||114|WWWW|CC|BBBBB|AAAF||"ZZZZ FFFF | FFF | GGGG|[A"||114|WWWW|CC|BBBBB|AAAF||"ZZZZ FFFF ,  FFF ,  GGGG, ]|4  |
+    #+---------------------------------------------------+---------------------------------------------------------+---+
+
+    df_new = df.select(split(regexp_replace(df.columns[0], ptn, '$1\0'),'\0').alias('t1')) \
+               .select([ col('t1')[i].alias(cols[i]) for i in range(len(cols))])
+    df_new.show(truncate=False)
+    +---------------------------------------+-----+-----+
+    |A                                      |B    |C    |
+    +---------------------------------------+-----+-----+
+    |AAAA                                   |BBBB |CCCC |
+    |A"||114|WWWW|CC|BBBBB|AAAF||"ZZZZ FFFF |     |null |
+    |"||114|WWWW|CC|BBBBB|AAAF||"ZZZZ FFFF  |     |null |
+    |A"||114|WWWW|CC|BBBBB|AAAF||"ZZZZ FFFF | FFF | GGGG|
+    +---------------------------------------+-----+-----+
+
