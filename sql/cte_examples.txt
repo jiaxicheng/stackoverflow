@@ -1,0 +1,88 @@
+Some typical usages with CTE (Common Table Expression):
+Examples using Spark SQL 2.4.0, MySQL 8.0
+---
+
+
+Example-1: multiple CTE in a query and reference the preceding CTEs
+
+    REF: https://github.com/jiaxicheng/bigdata/blob/master/pyspark/notes/n097-pyspark-data_cleansing-3-transform.txt
+
+    SparkSQL example:
+
+    df_new = spark.sql("""
+
+       with t1 AS (SELECT *, split(fits_assembly_name, '(?:(?!/)\\\p{Punct}|\\\s)+') as temp1 FROM df_table)
+          , t2 AS (SELECT *, transform(temp1, x -> filter(split(x, '/'), y-> y <> '')) as temp2 FROM t1)
+          , t3 AS (SELECT *, flatten(
+                transform(temp2, x ->
+                  transform(sequence(0, size(x)-1), i ->
+                    concat(substr(x[0], 1, length(x[0])-length(x[i])), x[i])
+                  )
+                )
+              ) AS temp3 
+              FROM t2
+            ) 
+       SELECT concat_ws(' ', array_distinct(flatten(collect_list(temp3)))) AS Assembly_names   
+            , concat_ws(' ', collect_set(fits_assembly_id)) AS Assembly_ids
+       FROM t3
+       GROUP BY Itemno
+
+    """)
+
+
+Example-2: RECURSIVE CTE: a decent way to resolve neural network, hierarchical/tree structure data
+    not juse retrieve all related nodes, but also the level from their root_parent.
+
+    REF: http://database-programmer.blogspot.com/2010/11/recursive-queries-with-common-table.html
+
+    DataSet with MySQL example:
+
+        CREATE TABLE EMPLOYEES ( 
+            ID INT PRIMARY KEY
+          , NAME VARCHAR(100)
+          , MANAGER_ID INT
+          , INDEX (MANAGER_ID),FOREIGN KEY (MANAGER_ID) REFERENCES EMPLOYEES(ID) 
+        )
+        ;
+        INSERT INTO EMPLOYEES VALUES (333, "Yasmina", NULL)
+        , (198, "John", 333)
+        , (692, "Tarek", 333)
+        , (29, "Pedro", 198)
+        , (4610, "Sarah", 29)
+        , (72, "Pierre", 29)
+        , (123, "Adil", 692)
+        ;
+
+    MySQL syntax using Recursive CTE: 
+
+        WITH RECURSIVE managers (ID, name, root_manager, direct_manager, level) 
+        AS (
+            SELECT id, name, name, manager_id, 1
+            FROM EMPLOYEES 
+            WHERE MANAGER_ID is NULL  
+            
+            UNION 
+            
+            SELECT e.ID, e.name, m.root_manager, e.manager_id, m.level+1 
+            FROM managers m 
+            JOIN EMPLOYEES e ON e.MANAGER_ID = m.id 
+        ) 
+        SELECT * from managers;
+        +------+---------+--------------+----------------+-------+
+        | ID   | name    | root_manager | direct_manager | level |
+        +------+---------+--------------+----------------+-------+
+        |  333 | Yasmina | Yasmina      |           NULL |     1 |
+        |  198 | John    | Yasmina      |            333 |     2 |
+        |  692 | Tarek   | Yasmina      |            333 |     2 |
+        |   29 | Pedro   | Yasmina      |            198 |     3 |
+        |  123 | Adil    | Yasmina      |            692 |     3 |
+        |   72 | Pierre  | Yasmina      |             29 |     4 |
+        | 4610 | Sarah   | Yasmina      |             29 |     4 |
+        +------+---------+--------------+----------------+-------+
+
+    Notes:
+     (1) RECURSIVE CTE is supported as of MySQL 8.0
+         RECURSIVE CTE is not yet supported as of Spark 2.4 https://jira.apache.org/jira/browse/SPARK-24497
+     (2) RECURSIVE CTE must contain a `UNION` 
+
+
