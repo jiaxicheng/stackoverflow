@@ -1,0 +1,49 @@
+https://stackoverflow.com/questions/58704887/how-do-i-use-apache-spark-and-lxml-to-parse-filter-and-aggregate-data/58735152#58735152
+
+One way you can try is the Spark SQL **[xpath][1]** related builtin functions, but only if the xmls are all valid XML(or can be easily converted into valid XMLs) and on their own line. 
+
+    # read file in line mode, we get one column with column_name = 'value'
+    df = spark.read.text('....')
+    
+For example, with the current sample XMLs, we can trim the leading and trailing commas, single-quotes and spaces, take the XPATH `row//@CommentCount` which is the value of CommentCount attribute under the row tag, this will get an array column of matched attribute values:
+
+    df.selectExpr('''xpath(trim(both ",' " from value), "row//@CommentCount") as CommentCount''').show()   
+    +------------+
+    |CommentCount|
+    +------------+
+    |         [5]|
+    |         [4]|
+    +------------+
+
+You can then take the sum on the first element of each array:
+
+    df.selectExpr('''
+        sum(xpath(trim(both ",' " from value), "row//@CommentCount")[0]) as sum_CommentCount
+    ''').show()
+    +----------------+
+    |sum_CommentCount|
+    +----------------+
+    |             9.0|
+    +----------------+
+
+Problem with this method is that it's very fragile and any invalid XML will fail the whole process and I don't find any fix for this as of now.
+
+Another way is to use API function: [regexp_extract][2], which can be practical since the texts you want to retrieve is simple (i.e. no embedded tags or quotes etc).
+
+    from pyspark.sql.functions import regexp_extract
+
+    df.select(regexp_extract('value', r'\bCommentCount="(\d+)"', 1).astype('int').alias('CommentCount')).show()                                                                                                   
+    +------------+
+    |CommentCount|
+    +------------+
+    |           5|
+    |           4|
+    +------------+
+
+you can then take the sum on this integer column. Just my 2 cents.
+
+
+  [1]: https://spark.apache.org/docs/latest/api/sql/index.html#xpath
+  [2]: https://spark.apache.org/docs/latest/api/python/pyspark.sql.html#pyspark.sql.functions.regexp_extract
+
+
