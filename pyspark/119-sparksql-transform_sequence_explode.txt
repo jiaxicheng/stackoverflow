@@ -63,6 +63,40 @@ For **Spark 2.4.0+**, you can use **[sequence][1]** + **[transform][2]** + explo
 
     ''').show()
 
+#################################################
+More request to handle the same in weekly basis:
+#################################################
+"""
+Use date_trunc('WEEK', date_col) which truncate the date_col to the Monday of the same week.
+Use sequence(start_date, end_date, interval 7 days) to generate the sequence
+"""
+
+df_weekly = (df
+    .withColumn('s_date', expr("date(date_trunc('WEEK', to_date(StartDate, 'M/d/yyyy')))"))
+    .withColumn('e_date', expr("date(date_trunc('WEEK', IFNULL(to_date(EndDate, 'M/d/yyyy'), date_sub(current_date(),7))))"))
+    .withColumn('StartOfTheWeek', expr('explode_outer(sequence(s_date, e_date, interval 7 days))'))
+    .withColumn('IsDeliveryOpen', expr("IF(e_date > StartOfTheWeek or EndDate is Null, 1, 0)"))
+)
+
+
+# Or in the Spark SQL syntax:
+df.createOrReplaceTempView('t_df')
+
+spark.sql('''
+
+    WITH d AS (
+        SELECT *
+             , date(date_trunc('WEEK', to_date(StartDate, 'M/d/yyyy'))) AS s_date
+             , date(date_trunc('WEEK', IFNULL(to_date(EndDate, 'M/d/yyyy'), date_sub(current_date(),7)))) AS e_date
+        FROM t_df
+    )
+    SELECT d.*
+         , w.StartOfTheWeek
+         , IF(e_date > w.StartOfTheWeek or d.EndDate is NULL,1,0) AS IsDeliveryOpen
+    FROM d
+    LATERAL VIEW OUTER explode(sequence(s_date, e_date, interval 7 days)) w AS StartOfTheWeek
+
+''')
 
 
   [1]: https://spark.apache.org/docs/2.4.0/api/sql/index.html#sequence
