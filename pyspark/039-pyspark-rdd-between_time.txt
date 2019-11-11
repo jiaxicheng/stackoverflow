@@ -1,0 +1,35 @@
+https://stackoverflow.com/questions/58794219/pyspark-rdd-operation-for-timesteps/58794344#58794344
+
+Find all records with time between 08:00:00 and 09:00:00 includively
+textFile:
+---
+0, Alpha,-3.9, 4, 2001-02-01 08:00:00, 5, 20
+0, Beta, -3.8, 3, 2001-02-01 08:15:00, 6, 21
+1, Gamma,-3.7, 8, 2001-02-01 08:30:00, 7, 22
+0, Alpha,-3.5, 4, 2001-02-01 08:45:00, 8, 23
+0, Alpha,-3.9, 4, 2001-02-01 09:00:00, 8, 27
+0, Gamma,-3.5, 5, 2001-02-01 09:15:00, 6, 21
+
+    newrdd = rdd.map(lambda x: x.split(',')) 
+
+Method-1: using str.startswith(('08:', '09:00:00')) which works for simple cases like this example
+
+    newrdd.filter(lambda e: e[4].split()[1].startswith(('08:', '09:00:00'))) \
+          .map(lambda e: (e[1], int(e[5]))) \
+          .reduceByKey(lambda x,y: x+y) \
+          .collect()
+    #[(' Alpha', 21), (' Beta', 6), (' Gamma', 7)]
+
+
+Method-2: between any start and end times, use datetime.time.fromisoformat()
+
+    from datetime import time
+
+    s_time = time(8,0,0)
+    e_time = time(9,0,0)
+    newrdd.filter(lambda e: s_time <= time.fromisoformat(e[4].split()[1]) <= e_time) \
+          .map(lambda e: (e[1], int(e[5]))) \
+          .reduceByKey(lambda x,y: x+y) \
+          .collect()
+    #[(' Alpha', 21), (' Beta', 6), (' Gamma', 7)]
+
