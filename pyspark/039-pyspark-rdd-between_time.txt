@@ -21,7 +21,9 @@ Method-1: using str.startswith(('08:', '09:00:00')) which works for simple cases
     #[(' Alpha', 21), (' Beta', 6), (' Gamma', 7)]
 
 
-Method-2: between any start and end times, use datetime.time.fromisoformat()
+Method-2: between any start and end times
+
+(1) For python 3.75+, use datetime.time.fromisoformat()
 
     from datetime import time
 
@@ -32,4 +34,15 @@ Method-2: between any start and end times, use datetime.time.fromisoformat()
           .reduceByKey(lambda x,y: x+y) \
           .collect()
     #[(' Alpha', 21), (' Beta', 6), (' Gamma', 7)]
+
+
+(2) Prior to Python 3.7.5, use datetime.strptime().time():
+  
+    from datetime import time, datetime
+
+    newrdd.filter(lambda e: s_time <= datetime.strptime(e[4].strip(), '%Y-%m-%d %H:%M:%S').time() <= e_time) \
+          .map(lambda e: (e[1], int(e[5]))) \
+          .reduceByKey(lambda x,y: x+y) \
+          .collect()
+    
 
