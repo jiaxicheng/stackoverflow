@@ -1,0 +1,97 @@
+https://docs.python.org/3/library/datetime.html#datetime.time
+
+import datetime
+
++ datetime.datetime(year, month, day, hour=0, minute=0, second=0, microsecond=0, tzinfo=None, fold=0)
+  + classmethod:
+    + datetime.today()
+    + datetime.now(tz=None)
+    + datetime.utcnow()
+    + datetime.fromtimestamp(ts, tz=None)
+    + datetime.utcfromtimestamp(timestamp)
+    + datetime.fromordinal(ordinal)
+    + datetime.combine(date, time, tzinfo=self.tzinfo)
+    + datetime.fromisoformat(date_string)
+    + datetime.fromisocalendar(year, week, day)
+    + datetime.strptime(date_string, format)
+  + instance method:
+    + datetime.date()
+    + datetime.time()
+    + datetime.timetz()
+    + datetime.replace(year=self.year, month=self.month, day=self.day, hour=self.hour, minute=self.minute
+                     , second=self.second, microsecond=self.microsecond, tzinfo=self.tzinfo, * fold=0)
+    + datetime.astimezone(tz=None)
+    + datetime.utcoffset()
+    + datetime.dst()
+    + datetime.tzname()
+    + datetime.timetuple()
+    + datetime.utctimetuple()
+    + datetime.toordinal()
+    + datetime.timestamp()
+    + datetime.weekday()
+    + datetime.isoweekday()
+    + datetime.isocalendar(): Return a 3-tuple, (ISO year, ISO week number, ISO weekday)
+    + datetime.isoformat(sep='T', timespec='auto')
+    + datetime.strftime(format)
+  Notes:
+   (1) unix_timestamp: seconds since '1970-01-01 00:00:00' UTC as unsigned integer. AKA epoch time, POSIX time
+       datetime.timestamp() return the epoch time.
+   (2) date, datetime and time objects support strftime() to convert date/time objects into string(instance method)
+       only datetime object support strptime() to convert string into datetime object(a class method)
+       Format Codes: https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes
+
+
++ datetime.date(year, month, day)
+  + classmathod:
+    + date.today()
+    + date.fromtimestamp(ts)
+    + date.fromordinal()
+    + date.fromisoformat(date_string): from python 3.7+
+    + date.fromisocalendar(year, week, day): from python 3.8+
+  + instance method:
+    + date.replace(year=self.year, month=self.month, day=self.day)
+    + date.timetuple()
+    + date.weekday()  0-based (0=Monday)
+    + date.isoweekday()  1-based (1=Monday)
+    + date.isoformat()
+    + date.strftime()
+    + date.ctime()
+
+
++ datetime.time(hour=0, minute=0, second=0, microsecond=0, tzinfo=None, *, fold=0)
+  + classmethod:
+    + time.fromisoformat(time_string):  new in python 3.7
+  + instance method:
+    + time.replace(hour=self.hour, minute=self.minute, second=self.second, microsecond=self.microsecond
+                 , tzinfo=self.tzinfo, * fold=0)
+    + time.isoformat(timespec='auto')
+    + time.strftime(format)
+    + time.utcoffset()
+    + time.dst()
+    + time.tzname()
+ 
+  Notes: 
+   (1) time.dst() returns the daylight saving time (DST) adjustment.
+
+
+
++ datetime.timedelta(days=0, seconds=0, microseconds=0, milliseconds=0, minutes=0, hours=0, weeks=0)
+  + instance method:
+    + timedelta.total_seconds()    new in 3.2
+
+  Notes: 
+
+
+
++ datetime.tzinfo
++ datetime.timezone(offset, name=None)
+  + arguments:
+    + offset must be a timedelta object between -timedelta(hours=24) and timedelta(hours=24)
+ 
+  Notes:
+   (1) check pytz http://pytz.sourceforge.net/
+
+        from pytz import timezone
+        eastern = timezone('US/Eastern')
+        datetime.now(eastern)
+
