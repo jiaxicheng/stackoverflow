@@ -1,0 +1,41 @@
+Regex used with PySpark projects:
+
+
+---
+  + In Dataframe API functions: Java-based regex-engine
+    ---
+    + regexp_replace('orig_col', r'(?:\p{Punct}|\s)+', ' ')
+    + use r'..' raw string, so no need to escape backslash '\'
+
+  + In Spark SQL: Java-based regex-engine
+    ---
+    + regexp_replace(col, pattern, replacement)
+    + in pattern: backslash need to add two more, thus \s --> \\\s
+    
+    
+  + In Python-based udf: Python-based regex engine
+    ---
+    + use r'..' raw string, no need to escape backslash '\'
+
+
+
+Task-1: Replacing punctuations and whitespaces with a SPACE 
+---
+  + DF-API  : regexp_replace('orig_col', r'(?:\p{Punct}|\s)+', ' ')  
+  + SparkSQL: regexp_replace(orig_col, "(?:\\\p{Punct}|\\\s)+", " ")
+  + Python  : re.sub(orig_val, r'(?:\p{Punct}|\s), ' ')
+
+  Note: `\p{..}` can also be used in charset:  `[\p{Punct}\s]+` --> `(?:\p{Punct}|\s)+`
+
+
+
+Task-2: using named capturing group with regexp_replace:
+---
+  The Java-based regex engine is applied with API function regexp_replace():
+
+    named-capturing group:  (?<name>sub-pattern)   
+      in replacement part:  ${name}                      <-- need curly braces
+         Note: \g<name> does not work
+
+      df.withColumn('t1', regexp_replace('name', r'(?<n1>..).(?<n2>..)', '${n1}|${n2}'))
+
