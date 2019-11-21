@@ -25,6 +25,13 @@ Task-1: Replacing punctuations and whitespaces with a SPACE
   + SparkSQL: regexp_replace(orig_col, "(?:\\\p{Punct}|\\\s)+", " ")
   + Python  : re.sub(orig_val, r'(?:\p{Punct}|\s), ' ')
 
+  + SparkSQL: 3-4 backslash 
+         `\\\s` -> white-spaces in regex pattern    <-- both 3 and 4 back-slashes work
+         `\0`   -> NULL char in replacement part    <-- no need escape
+    example:
+        split(regexp_replace(fits_assembly_name, '^(.*?)\\\s+-\\\s+(\\\S+)(.*)$', '$1$3\0$2'), '\0') as new_col
+
+
   Note: `\p{..}` can also be used in charset:  `[\p{Punct}\s]+` --> `(?:\p{Punct}|\s)+`
 
 
