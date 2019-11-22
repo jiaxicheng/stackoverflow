@@ -1,0 +1,84 @@
+https://stackoverflow.com/questions/58982095/fix-query-to-resolve-to-char-and-or-string-comparison-issue-in-scala-databricks/58982726?noredirect=1#comment104220220_58982726
+
+This is an example using rangeBetween to do Window moving aggregate for N previous seasons
+based on monthly data.
+
+Nots: 
+  (1) Season are defined as (can be extened to any date ranges):
+    - Spring: 0301-0531
+    - Summer: 0601-0831
+    - Autumn: 0901-1130
+    - Winter: 1201-0229
+  (2) Each season can heva multiple Rows (months), so WindowSpec with rowsBerween
+      is not flexible and rangeBetween should be used
+  (3) we divide the season into 4 evenly slots from 0, 25, 50 to 75, the label is thus
+       spring = year(requestDate)*100
+       summer = year(requestDate)*100 + 25
+       autumn = year(requestDate)*100 + 50
+       winter(Dec) = year(requestDate)*100 + 75
+       winter(Jab+Feb) = (year(requestDate)-1)*100 + 75
+  (4) For the current season + 3 previous seasons, the Frame bound of the Window Spec:
+
+        RANGE BETWEEN 4*25 PRECEDING AND CURRENT ROW
+
+  (5) No need to use named_struct if only need the season.label. however, if you need to filter/groupby
+      years, named seasons, this could help.
+
+
+Code and logic see below:
+
+    #Sample data on Laptop:
+    df = spark.read.csv('/home/xichengjia/test/datetime-1.txt', header=True)
+
+    from pyspark.sql.functions import expr
+
+    df1 = df.withColumn('MMDD', expr('date_format(requestDate, "MMdd")')) \
+        .withColumn('season', expr("""
+           CASE
+             WHEN MMDD BETWEEN '0301' AND '0531' THEN 
+               named_struct('year', year(requestDate), 'season', 'spring', 'label', int(year(requestDate))*100)
+             WHEN MMDD BETWEEN '0601' AND '0831' THEN 
+               named_struct('year', year(requestDate), 'season', 'summer', 'label', int(year(requestDate))*100 + 25)
+             WHEN MMDD BETWEEN '0901' AND '1130' THEN 
+               named_struct('year', year(requestDate), 'season', 'autumn', 'label', int(year(requestDate))*100 + 50)
+             WHEN MMDD BETWEEN '1201' AND '1231' THEN 
+               named_struct('year', year(requestDate), 'season', 'winter', 'label', int(year(requestDate))*100 + 75)
+             WHEN MMDD BETWEEN '0101' AND '0228' THEN 
+               named_struct('year', year(requestDate)-1, 'season', 'winter', 'label', (int(year(requestDate))-1)*100 + 75)
+           END
+     """)).selectExpr("*", """
+
+           sum(totalRequested) OVER (
+             ORDER BY season.label
+             RANGE BETWEEN 100 PRECEDING AND CURRENT ROW
+           ) AS sum_totalRequested
+
+     """).show()
+    +-----------+--------------+-----------+----+----------------------+------------------+
+    |itemno     |totalRequested|requestDate|MMDD|season                |sum_totalRequested|
+    +-----------+--------------+-----------+----+----------------------+------------------+
+    |7519278    |96.0          |2013-04-01 |0401|[2013, spring, 201300]|96.0              |
+    |5437662-070|78.0          |2013-07-01 |0701|[2013, summer, 201325]|174.0             |
+    |7512365    |110.0         |2014-02-01 |0201|[2013, winter, 201375]|381.0             |
+    |5436134-070|8.0           |2013-12-01 |1201|[2013, winter, 201375]|381.0             |
+    |7547385    |89.0          |2014-01-01 |0101|[2013, winter, 201375]|381.0             |
+    |5133406    |46.0          |2014-05-01 |0501|[2014, spring, 201400]|427.0             |
+    |0453978    |18.0          |2014-09-01 |0901|[2014, autumn, 201450]|542.0             |
+    |7558402    |260.0         |2014-10-01 |1001|[2014, autumn, 201450]|542.0             |
+    |3089858    |5.0           |2014-11-01 |1101|[2014, autumn, 201450]|542.0             |
+    |7178940    |5.0           |2014-10-01 |1001|[2014, autumn, 201450]|542.0             |
+    |3086317    |1.0           |2014-09-01 |0901|[2014, autumn, 201450]|542.0             |
+    |0450636    |7.0           |2015-01-01 |0101|[2014, winter, 201475]|549.0             |
+    |1824299    |1.0           |2015-05-01 |0501|[2015, spring, 201500]|345.0             |
+    |2204331    |2.0           |2015-03-01 |0301|[2015, spring, 201500]|345.0             |
+    |5437474-620|4.0           |2015-08-01 |0801|[2015, summer, 201525]|303.0             |
+    |2204858    |34.0          |2015-12-01 |1201|[2015, winter, 201575]|48.0              |
+    |7181584    |4.0           |2017-02-01 |0201|[2016, winter, 201675]|38.0              |
+    |7081417    |15.0          |2017-03-01 |0301|[2017, spring, 201700]|54.0              |
+    |5814215    |35.0          |2017-04-01 |0401|[2017, spring, 201700]|54.0              |
+    |5334160    |2.0           |2018-01-01 |0101|[2017, winter, 201775]|56.0              |
+    +-----------+--------------+-----------+----+----------------------+------------------+
+        
+    
+    
+    
