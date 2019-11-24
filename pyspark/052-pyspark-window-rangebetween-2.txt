@@ -24,6 +24,8 @@ Nots:
   (5) No need to use named_struct if only need the season.label. however, if you need to filter/groupby
       years, named seasons, this could help.
 
+Note: the actual problem need to calculate the season total first using groupby(itemno, season)
+      then work on the Window aggregate sum.
 
 Code and logic see below:
 
@@ -79,6 +81,88 @@ Code and logic see below:
     |5334160    |2.0           |2018-01-01 |0101|[2017, winter, 201775]|56.0              |
     +-----------+--------------+-----------+----+----------------------+------------------+
         
-    
+An improved version using Spark SQL:
+
+    df.createOrReplaceTempView("df_table")
+
+    df1 = spark.sql("""
+        WITH t1 AS ( SELECT *
+                     , year(requestDate) as YY
+                     , date_format(requestDate, "MMdd") as MMDD 
+                     FROM df_table )
+           , t2 AS ( SELECT *,
+           CASE
+             WHEN MMDD BETWEEN '0301' AND '0531' THEN
+               named_struct(
+                   'startDateOfSeason', date(concat_ws('-', YY, '03-01'))
+                 , 'endDateOfSeason', date(concat_ws('-', YY, '05-31'))
+                 , 'season', 'spring'
+                 , 'label', int(YY)*100
+               )
+             WHEN MMDD BETWEEN '0601' AND '0831' THEN
+               named_struct(
+                   'startDateOfSeason', date(concat_ws('-', YY, '06-01'))
+                 , 'endDateOfSeason', date(concat_ws('-', YY, '08-31'))
+                 , 'season', 'summer'
+                 , 'label', int(YY)*100 + 25
+               )
+             WHEN MMDD BETWEEN '0901' AND '1130' THEN
+               named_struct(
+                   'startDateOfSeason', date(concat_ws('-', YY, '09-01'))
+                 , 'endDateOfSeason', date(concat_ws('-', YY, '11-30'))
+                 , 'season', 'autumn'
+                 , 'label', int(YY)*100 + 50
+               )
+             WHEN MMDD BETWEEN '1201' AND '1231' THEN
+               named_struct(
+                   'startDateOfSeason', date(concat_ws('-', YY, '12-01'))
+                 , 'endDateOfSeason', last_day(concat_ws('-', int(YY)+1, '02-28'))
+                 , 'season', 'winter'
+                 , 'label', int(YY)*100 + 75
+               )
+             WHEN MMDD BETWEEN '0101' AND '0229' THEN
+               named_struct(
+                   'startDateOfSeason', date(concat_ws('-', int(YY)-1, '12-01'))
+                 , 'endDateOfSeason', last_day(concat_ws('-', YY, '02-28'))
+                 , 'season', 'winter'
+                 , 'label', (int(YY)-1)*100 + 75
+               )
+           END AS seasons
+           FROM t1
+      )
+      SELECT itemno
+      ,      seasons.*
+      ,      sum(totalRequested) AS sum_totalRequestedBySeason
+      FROM t2
+      GROUP BY itemno, seasons
+
+       """)
+
+    df1.show()
+    +-----------+-----------------+---------------+------+------+--------------------------+
+    |     itemno|startDateOfSeason|endDateOfSeason|season| label|sum_totalRequestedBySeason|
+    +-----------+-----------------+---------------+------+------+--------------------------+
+    |5436134-070|       2013-12-01|     2014-01-28|winter|201375|                       8.0|
+    |    1824299|       2015-03-01|     2015-05-31|spring|201500|                       1.0|
+    |    0453978|       2014-09-01|     2014-11-30|autumn|201450|                      18.0|
+    |    7181584|       2016-12-01|     2017-02-28|winter|201675|                       4.0|
+    |    7178940|       2014-09-01|     2014-11-30|autumn|201450|                       5.0|
+    |    7547385|       2013-12-01|     2014-02-28|winter|201375|                      89.0|
+    |    5814215|       2017-03-01|     2017-05-31|spring|201700|                      35.0|
+    |    3086317|       2014-09-01|     2014-11-30|autumn|201450|                       1.0|
+    |    0450636|       2014-12-01|     2015-02-28|winter|201475|                       7.0|
+    |    2204331|       2015-03-01|     2015-05-31|spring|201500|                       2.0|
+    |5437474-620|       2015-06-01|     2015-08-31|summer|201525|                       4.0|
+    |    5133406|       2014-03-01|     2014-05-31|spring|201400|                      46.0|
+    |    7081417|       2017-03-01|     2017-05-31|spring|201700|                      15.0|
+    |    7519278|       2013-03-01|     2013-05-31|spring|201300|                      96.0|
+    |    7558402|       2014-09-01|     2014-11-30|autumn|201450|                     260.0|
+    |    2204858|       2015-12-01|     2015-02-28|winter|201575|                      34.0|
+    |5437662-070|       2013-06-01|     2013-08-31|summer|201325|                      78.0|
+    |    5334160|       2017-12-01|     2018-02-28|winter|201775|                       2.0|
+    |    3089858|       2014-09-01|     2014-11-30|autumn|201450|                       5.0|
+    |    7512365|       2013-12-01|     2014-02-28|winter|201375|                     110.0|
+    +-----------+-----------------+---------------+------+------+--------------------------+
+
     
     
