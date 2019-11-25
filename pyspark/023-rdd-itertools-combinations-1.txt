@@ -1,0 +1,38 @@
+Examples using itertools.combinations:
+
+Example-1: using in a map RDD function:
+    REF: https://stackoverflow.com/questions/58959361
+
+    from itertools import combinations
+
+    signatures.groupBy(lambda x: x[0]) \
+        .mapValues(lambda x: set([ 
+            (y1[1], y2[1], len(set(y1[2]).intersection(set(y2[2])))) 
+              for y1,y2 in combinations(x,2) 
+      ])).collect()
+    # [(2, {(2, 4, 5)}), (1, {(1, 3, 0), (1, 5, 2), (3, 5, 0)})]
+
+
+    Method-1-2: use list comprehension alone, y[0] must be unique to make it work
+
+    rdd = signatures.map(lambda x: (x[0], [(x[1], x[2])])).reduceByKey(lambda x,y:x+y) 
+
+    rdd.join(rdd).mapValues(lambda x: set([ 
+        (y1[0], y2[0], len(set(y1[1]).intersection(set(y2[1])))) 
+          for y1 in x[0] 
+            for y2 in x[1] 
+              if y2[0] < y1[0] 
+      ]) ).collect() 
+    # [(2, {(4, 2, 5)}), (1, {(3, 1, 0), (5, 1, 2), (5, 3, 0)})]
+
+    Method-1-3: use a separate function:
+
+    def grouped(x): 
+      d = dict() 
+      for e in x: 
+        d[e[0]] = d[e[0]] + [e[1]] if e[0] in d else [e[1]] 
+      return tuple(d.items()) 
+
+    rdd1.map(grouped).collect()
+
+
