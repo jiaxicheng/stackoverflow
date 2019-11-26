@@ -1,5 +1,12 @@
 https://stackoverflow.com/questions/59034395/how-to-do-this-transformation-in-sql-spark
 
+As a side-note, this is not a solution as the OP did not show a more general example.
+The samilar questions had been asked several times in the past few months, as one of the
+frequently asked questions, there is no sound solution for now (something like recursive join
+might work, but not available in SparkSQL)
+
+One way using array_intersect() function and a self left-join:
+
     from pyspark.sql.functions import collect_set, expr 
 
     df = spark.createDataFrame([
@@ -19,20 +26,24 @@ create df1 containing device-id and all its associated account-ids in an array c
     |       d4|    [a6]|
     +---------+--------+
 
-Do a self join to find all acct_ids arrays which have intersection (at least one common item).
+
+Do a self left-join to find all acct_ids arrays which have intersection (at least one common item, exclude self).
 merge(array_union) and sort(array_sort) acct_ids from two data sources. groupby this new list and 
 then find the collect_set of the device-Ids:
 
     df_new = df1.alias('d1').join(
           df1.alias('d2')
-        , expr('size(array_intersect(d1.acct_ids, d2.acct_ids)) > 0 AND d1.acct_ids <> d2.acct_ids')
+        , expr('''
+              size(array_intersect(d1.acct_ids, d2.acct_ids)) > 0 
+              AND d1.`Device-Id` <> d2.`Device-Id`
+          ''')
         , how='left'
     ).selectExpr(
           'd1.`Device-Id`'
         , 'array_sort(array_union(d1.acct_ids, ifnull(d2.acct_ids, array()))) as `Accounts-Used`'
-    ).groupby('`Accounts-Used`') \
-    .agg(collect_set('`Device-Id`').alias('`Devices-Used`')) \
-    .withColumn('`Unique-User-Id`', expr('uuid()'))
+    ).groupby('Accounts-Used') \
+    .agg(collect_set('Device-Id').alias('Devices-Used')) \
+    .withColumn('Unique-User-Id', expr('uuid()'))
 
     df_new.show(truncate=False)                                                                                         
     +-------------+--------------+------------------------------------+             
@@ -64,3 +75,35 @@ Output after selectExpr:
     |       d1| [a1, a2, a3]|
     |       d4|         [a6]|
     +---------+-------------+
+
+in SQL:
+
+    df.createOrReplaceTempView('df_table')
+
+    spark.sql("""
+
+        WITH df1 AS (
+            SELECT `Device-Id`
+            ,      collect_set(`Account-Id`) AS acct_ids
+            FROM df_table
+            GROUP BY `Device-Id`
+        ), df2 AS (
+        
+            SELECT d1.`Device-Id`
+            ,      array_sort(array_union(d1.acct_ids, ifnull(d2.acct_ids, array()))) as `Accounts-Used`
+            FROM df1 AS d1
+            LEFT JOIN df1 AS d2 ON (
+                size(array_intersect(d1.acct_ids, d2.acct_ids)) > 0
+                AND d1.`Device-Id` <> d2.`Device-Id`
+            )
+        )
+        
+        SELECT uuid() AS `Unique-User-Id`
+        ,      `Accounts-Used`
+        ,      collect_set(`Device-Id`) AS `Devices-Used`
+        FROM df2
+        GROUP BY `Accounts-Used`
+        
+     """).show(truncate=False)
+
+
