@@ -1,0 +1,66 @@
+https://stackoverflow.com/questions/59034395/how-to-do-this-transformation-in-sql-spark
+
+    from pyspark.sql.functions import collect_set, expr 
+
+    df = spark.createDataFrame([
+         ("d1","a1"), ("d2","a1"), ("d1","a2"),
+         ("d2","a3"), ("d3","a4"), ("d3","a5"), ("d4","a6")
+       ], ["Device-Id","Account-Id"])
+
+create df1 containing device-id and all its associated account-ids in an array column
+    
+    df1 = df.groupby('Device-Id').agg(collect_set('Account-Id').alias('acct_ids'))
+    +---------+--------+
+    |Device-Id|acct_ids|
+    +---------+--------+
+    |       d2|[a1, a3]|
+    |       d3|[a4, a5]|
+    |       d1|[a1, a2]|
+    |       d4|    [a6]|
+    +---------+--------+
+
+Do a self join to find all acct_ids arrays which have intersection (at least one common item).
+merge(array_union) and sort(array_sort) acct_ids from two data sources. groupby this new list and 
+then find the collect_set of the device-Ids:
+
+    df_new = df1.alias('d1').join(
+          df1.alias('d2')
+        , expr('size(array_intersect(d1.acct_ids, d2.acct_ids)) > 0 AND d1.acct_ids <> d2.acct_ids')
+        , how='left'
+    ).selectExpr(
+          'd1.`Device-Id`'
+        , 'array_sort(array_union(d1.acct_ids, ifnull(d2.acct_ids, array()))) as `Accounts-Used`'
+    ).groupby('`Accounts-Used`') \
+    .agg(collect_set('`Device-Id`').alias('`Devices-Used`')) \
+    .withColumn('`Unique-User-Id`', expr('uuid()'))
+
+    df_new.show(truncate=False)                                                                                         
+    +-------------+--------------+------------------------------------+             
+    |Accounts-Used|`Devices-Used`|`Unique-User-Id`                    |
+    +-------------+--------------+------------------------------------+
+    |[a1, a2, a3] |[d1, d2]      |67cb33a4-6422-4387-b9d9-523f3e24dc3d|
+    |[a4, a5]     |[d3]          |61b6761c-b71a-469e-970b-daf20a8435f1|
+    |[a6]         |[d4]          |4ac7652d-a880-477e-9c2e-441e08548aee|
+    +-------------+--------------+------------------------------------+
+
+Output after the left join:
+
+    +---------+--------+---------+--------+
+    |Device-Id|acct_ids|Device-Id|acct_ids|
+    +---------+--------+---------+--------+
+    |       d2|[a1, a3]|       d1|[a1, a2]|
+    |       d3|[a4, a5]|     null|    null|
+    |       d1|[a1, a2]|       d2|[a1, a3]|
+    |       d4|    [a6]|     null|    null|
+    +---------+--------+---------+--------+
+
+Output after selectExpr:
+
+    +---------+-------------+
+    |Device-Id|Accounts-Used|
+    +---------+-------------+
+    |       d2| [a1, a2, a3]|
+    |       d3|     [a4, a5]|
+    |       d1| [a1, a2, a3]|
+    |       d4|         [a6]|
+    +---------+-------------+
