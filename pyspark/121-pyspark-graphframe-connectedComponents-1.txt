@@ -1,0 +1,66 @@
+REF: https://stackoverflow.com/questions/59034395/how-to-do-this-transformation-in-sql-spark-graphframes
+
+Use GraphFrame to collect all linked devices/accounts and group them into one uuid (component)
+
+The trick is to merge Account-ID and Device-ID, but add a prefix to Device-ID so that we can 
+separate them later in the post-processing steps.
+
++ vertices: all distinct device-IDs and account-IDs
++ edges: the dataframe itself
+
+    df = spark.createDataFrame([ 
+             ("d1","a1"), ("d2","a1"), ("d1","a2"), ("d1","a4"), 
+             ("d2","a3"), ("d3","a4"), ("d3","a5"), ("d4","a6") 
+         ], ["Device-Id","Account-Id"]) 
+    
+    from graphframes import GraphFrame
+    from pyspark.sql.functions import collect_set, expr
+    
+    # required by GraphFrame
+    spark.sparkContext.setCheckpointDir("/tmp/111")
+  
+    # for small dataset, use a smaller spark.sql.shuffle.partitions  
+    spark.conf.set('spark.sql.shuffle.partitions', 5)
+    
+    edges = df.withColumn('Device-Id', expr('concat("_", `Device-Id`)')).toDF('src', 'dst')
+    vertices = edges.selectExpr('src as id').distinct().union(edges.select('dst').distinct())
+    
+    g = GraphFrame(vertices, edges)
+    
+    df1 = g.connectedComponents().groupby('component').agg(collect_set('id').alias('ids')).persist()
+    df1.show(truncate=False)                                                                                            
+    +------------+-----------------------------------+                              
+    |component   |ids                                |
+    +------------+-----------------------------------+
+    |309237645312|[a6, _d4]                          |
+    |85899345920 |[_d1, a4, a1, _d3, a3, a5, a2, _d2]|
+    +------------+-----------------------------------+
+    
+    df1.selectExpr(
+          'transform(filter(ids, x -> left(x,1) = "_"), y -> substr(y,2)) AS `Devices-Used`'
+        , 'filter(ids, x -> left(x,1) != "_") AS `Accounts-Used`'
+        , 'component AS `Unique-User-Id`'
+    ).show()
+    +------------+--------------------+--------------+                              
+    |Devices-Used|       Accounts-Used|Unique-User-Id|
+    +------------+--------------------+--------------+
+    |[d1, d3, d2]|[a4, a1, a3, a5, a2]|   85899345920|
+    |        [d4]|                [a6]|  309237645312|
+    +------------+--------------------+--------------+
+
+
+**Notes:**
+
+1. download the jar file from: https://spark-packages.org/package/graphframes/graphframes
+
+2. add related options to run pyspark or spark-submit, for example:
+
+   pyspark --packages graphframes:graphframes:0.7.0-spark2.4-s_2.11 --jars /path/to/graphframes-0.7.0-spark2.4-s_2.11.jar
+
+3. `g.connectedComponents()` could be slow, you might need to tweak the performance by checking its arguments or adjust your spark conf like `spark.sql.shuffle.partitions` etc.
+
+
+REF: https://graphframes.github.io/graphframes/docs/_site/api/python/graphframes.html
+    
+    
+    
