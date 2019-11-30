@@ -1,0 +1,72 @@
+More example using connectedComponents method from GraphFrame:
+
+Example-1: simple-one, two vertices of the edges are homogeneous, the same type:
+
+   REF: https://stackoverflow.com/questions/57938223/group-by-certain-record-in-array-pyspark
+
+    
+    from graphframes import GraphFrame
+    from pyspark.sql.functions import collect_set
+    
+    df = spark.createDataFrame([
+          ('a', list('abcdefghi')),('b', list('bcdejk')), ('c', list('cflm')), ('d', list('kbd')), ('n', list('nopq'))
+        , ('p', list('prst')), ('u', list('uvwx')), ('b', list('bfeg')), ('c', list('cbgh')), ('a', list('alfm'))
+        ], ['name', 'data']) 
+    
+    spark.sparkContext.setCheckpointDir("/tmp/111")
+    
+    edges = df.selectExpr('name as src', 'explode(data) as dst')
+    vertices = edges.selectExpr('src as id').union(edges.select('dst')).distinct()
+    
+    g = GraphFrame(vertices, edges)
+
+    df1 = g.connectedComponents().groupby('component').agg(collect_set('id').alias('ids'))
+    df1.show(truncate=False)
+    +----------+---------------------------------------+
+    |component |ids                                    |
+    +----------+---------------------------------------+
+    |3         |[r, t, n, s, p, q, o]                  |
+    |8589934596|[u, v, x, w]                           |
+    |0         |[c, l, k, h, i, m, b, g, j, a, e, f, d]|
+    +----------+---------------------------------------+
+
+
+Example-2: vertices can from different column/sources and are not related
+   REF: https://stackoverflow.com/questions/57917487/group-row-by-item-in-arraytype-column-using-pyspark 
+   similar: https://stackoverflow.com/questions/59034395
+
+    df = spark.createDataFrame([
+        (1, 'Hanoi', ['012346789', '032145698', '0565622253']),
+        (2, 'Singapore', ['012346789', '069855633']),
+        (3, 'Moscow', ['023466466', '069855633']),
+        (4, 'Tokyo', ['044656611', '061316561'])
+    ], ['id', 'address', 'phone_list'])
+
+    edges = df.selectExpr('address as src', 'explode(phone_list) as dst')
+    vertices = edges.selectExpr('src as id').union(edges.select('dst')).distinct()
+
+    g = GraphFrame(vertices, edges)
+
+    spark.sparkContext.setCheckpointDir("/tmp/111")
+    df1 = g.connectedComponents().groupby('component').agg(collect_set('id').alias('ids'))
+    df1.show(truncate=False)
+    +---------+----------------------------------------------------------------------------------+
+    |component|ids                                                                               |
+    +---------+----------------------------------------------------------------------------------+
+    |0        |[023466466, Moscow, 012346789, 069855633, Hanoi, Singapore, 0565622253, 032145698]|
+    |2        |[044656611, 061316561, Tokyo]                                                     |
+    +---------+----------------------------------------------------------------------------------+
+
+    df1.selectExpr(
+          'component as id'
+        , 'filter(ids, x -> x not rlike "^[0-9]+$") AS address'
+        , 'filter(ids, x -> x rlike "^[0-9]+$") AS phone_list'
+    ).show(truncate=False)
+    +---+--------------------------+--------------------------------------------------------+
+    |id |address                   |phone_list                                              |
+    +---+--------------------------+--------------------------------------------------------+
+    |0  |[Moscow, Hanoi, Singapore]|[023466466, 012346789, 069855633, 0565622253, 032145698]|
+    |2  |[Tokyo]                   |[044656611, 061316561]                                  |
+    +---+--------------------------+--------------------------------------------------------+
+
+
