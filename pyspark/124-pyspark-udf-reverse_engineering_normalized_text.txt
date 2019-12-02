@@ -16,8 +16,7 @@ be part of the expected matched sub-string.
 (4) map the start/end position to the position in original text by using the list `d`
 (5) return the substring based on the above two positions
     
-    @udf('string')
-    def find_matches(orig, normalized):
+    def find_matched(orig, normalized):
         n, d = ([], [])
         for i in range(len(orig)):
            if orig[i].isalnum(): 
@@ -25,11 +24,17 @@ be part of the expected matched sub-string.
                d.append(i)
         idx = ''.join(n).find(normalized)
         return orig[d[idx]:d[idx+len(normalized)]]
+
+    spark.udf.register('find_matched', find_matched, 'string')
     
-reverse-engineer the column_dataset_1_normalized from column_dataset_2:
+reverse-engineer the column_dataset_1_normalized from column_dataset_2, use udf only when column_dataset_1 can not find an exact match in column_dataset_2:
     
     df1.join(df2, cond3) \
-       .withColumn('matched', find_matches('column_dataset_2', 'column_dataset_1_normalized')) \
+       .withColumn('matched', expr('''
+           IF(locate(column_dataset_1, column_dataset_2)>0
+            , column_dataset_1
+            , find_matched(column_dataset_2, column_dataset_1_normalized))
+        ''')) \
        .select('column_dataset_2', 'matched', 'column_dataset_1_normalized') \
        .show(truncate=False) 
     
