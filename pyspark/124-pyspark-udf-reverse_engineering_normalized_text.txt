@@ -1,0 +1,43 @@
+https://stackoverflow.com/questions/59104192/filter-if-string-contain-sub-string-pyspark/59105848#59105848
+
+Reverse-engineer the normalized string to get the original sub-string from a text chunk.
+
+The normalized string is created by removing all '[:alnum:]' characters, i.e.:
+
+    df = df.withColumn(
+            "column_normalized",
+            F.regexp_replace(F.col("column_to_normalize"), "[^a-zA-Z0-9]+", ""))
+
+The following proposed udf-method will not cover leading/trailing characters which might
+be part of the expected matched sub-string. 
+(1) we use two lists, n,d to save chars in each normalized string and its position in the original text
+(2) ''.join(n) will be normalized original_text
+(3) find the position of `normalized` in the above text
+(4) map the start/end position to the position in original text by using the list `d`
+(5) return the substring based on the above two positions
+    
+    @udf('string')
+    def find_matches(orig, normalized):
+        n, d = ([], [])
+        for i in range(len(orig)):
+           if orig[i].isalnum(): 
+               n.append(orig[i])
+               d.append(i)
+        idx = ''.join(n).find(normalized)
+        return orig[d[idx]:d[idx+len(normalized)]]
+    
+reverse-engineer the column_dataset_1_normalized from column_dataset_2:
+    
+    df1.join(df2, cond3) \
+       .withColumn('matched', find_matches('column_dataset_2', 'column_dataset_1_normalized')) \
+       .select('column_dataset_2', 'matched', 'column_dataset_1_normalized') \
+       .show(truncate=False) 
+    
+    +------------------------------------------------------------------------------------+-----------------------+---------------------------+
+    |column_dataset_2                                                                    |matched                |column_dataset_1_normalized|
+    +------------------------------------------------------------------------------------+-----------------------+---------------------------+
+    |Por ejemplo, si W-B.7120RP-1605794se trata de un archivo de texto,                  |W-B.7120RP-1605794     |WB7120RP1605794            |
+    |utilizados 125858G_022BR/P-070751 frecuentemente (por ejemplo, un texto que describe|125858G_022BR/P-070751 |125858G022BRP070751        |
+    +------------------------------------------------------------------------------------+-----------------------+---------------------------+
+    
+          
