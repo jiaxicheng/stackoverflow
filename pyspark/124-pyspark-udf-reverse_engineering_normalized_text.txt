@@ -23,7 +23,7 @@ be part of the expected matched sub-string.
                n.append(orig[i])
                d.append(i)
         idx = ''.join(n).find(normalized)
-        return orig[d[idx]:d[idx+len(normalized)]]
+        return orig[d[idx]:d[idx+len(normalized)]] if idx >= 0 else None
 
     spark.udf.register('find_matched', find_matched, 'string')
     
@@ -46,3 +46,32 @@ reverse-engineer the column_dataset_1_normalized from column_dataset_2, use udf 
     +------------------------------------------------------------------------------------+-----------------------+---------------------------+
     
           
+Note:
+ (1) One bug with this method is that the trailing non-alnum will be kept in the matched, see above example `125858G_022BR/P-070751 `. this is how Python list slice work, in `orig[start:end]`, orig[end] is the first alnum char after the matched, and any non-alnum before this char will be included into the `matched`.
+
+    >>> find_matched('Por ejemplo, si W-B.7120RP-1605794se trata de un archivo de texto,     ', 'WB7120RP1605794')
+    'W-B.7120RP-1605794'
+
+    >>> find_matched('utilizados 125858G_022BR/P-070751 frecuentemente (por ejemplo, un describe','125858G022BRP070751')
+    '125858G_022BR/P-070751 '
+
+    >>> find_matched('utilizados 125858G_022BR/P-070751****frecuentemente (por ejemplo, un describe','125858G022BRP070751')
+    '125858G_022BR/P-070751****'
+
+ (2) use regexp_replace to remove the trailing alnum:
+
+    from pyspark.sql.functions import regexp_replace
+
+    df1.join(df2, cond1) \
+       .withColumn('matched', regexp_replace(udf_find_matched('column_dataset_2', 'column_dataset_1_normalized'), r'[^0-9a-zA-Z]+$', '')) \
+       .select('column_dataset_2', 'matched') \
+       .show(truncate=False)
+    +---------------------------------------------------------------------------------------+----------------------+
+    |column_dataset_2                                                                       |matched               |
+    +---------------------------------------------------------------------------------------+----------------------+
+    |Por ejemplo, si W-B.7120RP-1605794se trata de un archivo de texto,                     |W-B.7120RP-1605794    |
+    |se abrir¨¢ en un programa dW-B7120RP-1605794e procesamiento de texto.                  |W-B7120RP-1605794     |
+    |utilizados 125858G_022BR/P-070751*** frecuentemente (por ejemplo, un texto que describe|125858G_022BR/P-070751|
+    +---------------------------------------------------------------------------------------+----------------------+
+
+
