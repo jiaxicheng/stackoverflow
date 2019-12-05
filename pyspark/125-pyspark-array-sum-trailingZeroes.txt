@@ -1,0 +1,52 @@
+https://stackoverflow.com/questions/59181802
+
+sum up the numbers of all trailingZeroes from each array items:
+
+Spark 2.4+, use higher-order functions: aggregate + transform
+
++ use transform to convert array items from integer to number of trailing zeros:
+  Note: `rtrim('0',x)` is the substring by removing the trailing `0`s
+        length(x)-length(rtrim('0',x)) is the number of trailing zeroes
++ use aggregate to sum the above transformed array:
+
+
+    df.selectExpr('A', """
+        aggregate(
+            transform(A, x -> length(x)-length(rtrim('0',x)))
+          , 0
+          , (y,z) -> y+z
+        ) AS tralingZeroes
+    """).show()
+
+Older version, can do some String manipulations using concat_ws and regexp_replace:
+
+    df.withColumn('w1', concat_ws('_', 'A')) \
+      .withColumn('w2', regexp_replace('w1', r'\d*?(0*)(?:_|$)', '$1')) \
+      .withColumn('tralingZeroes', length('w2')) \
+      .show(truncate=False)
+    +---------------+---------+-----+-------------+
+    |A              |w1       |w2   |tralingZeroes|
+    +---------------+---------+-----+-------------+
+    |[1, 0, 1, 0, 0]|1_0_1_0_0|000  |3            |
+    |[2, 3, 4, 5, 6]|2_3_4_5_6|     |0            |
+    |[0, 0, 0, 0, 0]|0_0_0_0_0|00000|5            |
+    |[1, 2, 3, 4, 0]|1_2_3_4_0|0    |1            |
+    +---------------+---------+-----+-------------+
+
+
+A more general case:
+
+    df = spark.createDataFrame([([1200, 100, 30120, 10002],),([20,12,1,2010],)], ['myArray'])
+
+    df.withColumn('w1', concat_ws('_', 'myArray')) \
+      .withColumn('w2', regexp_replace('w1', r'\d*?(0*)(?:_|$)', '$1')) \
+      .withColumn('tralingZeroes', length('w2')) \
+      .show(truncate=False)
+    +-------------------------+--------------------+-----+-------------+
+    |myArray                  |w1                  |w2   |tralingZeroes|
+    +-------------------------+--------------------+-----+-------------+
+    |[1200, 100, 30120, 10002]|1200_100_30120_10002|00000|5            |
+    |[20, 12, 1, 2010]        |20_12_1_2010        |00   |2            |
+    +-------------------------+--------------------+-----+-------------+
+
+
