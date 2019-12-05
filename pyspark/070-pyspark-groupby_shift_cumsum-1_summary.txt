@@ -1,0 +1,81 @@
+https://stackoverflow.com/questions/57737035/pyspark-and-time-series-data-how-to-smartly-avoid-overlapping-dates
+    
+    import pandas as pd
+    import pyspark
+    import pyspark.sql.functions as fn
+    from pyspark.sql.window import Window
+    import datetime as dt
+    
+    raw_df = pd.DataFrame([
+        (1115, dt.datetime(2019,8,5,18,20), dt.datetime(2019,8,5,18,40)),
+        (484, dt.datetime(2019,8,5,18,30), dt.datetime(2019,8,9,18,40)),
+        (484, dt.datetime(2019,8,4,18,30), dt.datetime(2019,8,6,18,40)),
+        (484, dt.datetime(2019,8,2,18,30), dt.datetime(2019,8,3,18,40)),
+        (484, dt.datetime(2019,8,7,18,50), dt.datetime(2019,8,9,18,50)),
+        (1115, dt.datetime(2019,8,6,18,20), dt.datetime(2019,8,6,18,40)),
+    ], columns=['server_id', 'start_time', 'end_time'])
+    
+    df = spark.createDataFrame(raw_df)
+
+
+This is one of the problems which can be resolved by using Window lag(), sum() function to add a sub-group label 
+for ordered consecutive rows which match some specific conditions. Similar to what we do in Pandas using shift()+cumsum().
+
+Set up the Window Spec `w1` and calculate the following:
+  + max('end_time'): the max end_time before the current row on w1
+  + lag('end_time'): the previous end_time 
+  + sum('prev_end_time < current_start_time ? 1 : 0'): the flag to identify the sub-group
+
+The above three items can be corresponding to Pandas cummax(), shift() and cumsum().
+
+    w1 = Window.partitionBy('server_id').orderBy('start_time')
+    
+Calculate df1 which update end_time with `fn.max('end_time').over(w1))` and setup the sub-group label `g`,
+and then groupby `server_id` and `g` to calculate the min(start_time) and max(end_time)
+
+    df1 = df.withColumn('end_time', fn.max('end_time').over(w1)) \
+            .withColumn('g', fn.sum(fn.when(fn.lag('end_time').over(w1) < fn.col('start_time'),1).otherwise(0)).over(w1)) \
+            .groupby('server_id', 'g') \
+            .agg(fn.min('start_time').alias('start_time'), fn.max('end_time').alias('end_time'))
+
+    df1.show()
+    +---------+---+-------------------+-------------------+                         
+    |server_id|  g|         start_time|           end_time|
+    +---------+---+-------------------+-------------------+
+    |     1115|  0|2019-08-05 18:20:00|2019-08-05 18:40:00|
+    |     1115|  1|2019-08-06 18:20:00|2019-08-06 18:40:00|
+    |      484|  0|2019-08-02 18:30:00|2019-08-03 18:40:00|
+    |      484|  1|2019-08-04 18:30:00|2019-08-09 18:50:00|
+    +---------+---+-------------------+-------------------+
+
+Note: Another way to calculate df1 is to use Window spec and drop-duplicates, for example
+
+    w2 = Window.partitionBy('server_id', 'g').rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+
+    df1 = df.withColumn('end_time', fn.max('end_time').over(w1)) \
+            .withColumn('g', fn.sum(fn.when(fn.lag('end_time').over(w1) < fn.col('start_time'),1).otherwise(0)).over(w1)) \
+            .withColumn('start_time', fn.min('start_time').over(w2)) \
+            .withColumn('end_time', fn.max('end_time').over(w2)) \
+            .drop_duplicates(subset=['server_id', 'g', 'start_time', 'end_time'])
+    
+After we have df1, we can split the data using two selects and then union the resultset:    
+    
+    df_new = df1.selectExpr('server_id', 'start_time as event_dt', '1 as is_start').union(
+             df1.selectExpr('server_id', 'end_time as event_dt', '0 as is_start')
+    )
+    
+    df_new.orderBy('server_id', 'event_dt').show()                                                                            
+    +---------+-------------------+--------+                                        
+    |server_id|           event_dt|is_start|
+    +---------+-------------------+--------+
+    |      484|2019-08-02 18:30:00|       1|
+    |      484|2019-08-03 18:40:00|       0|
+    |      484|2019-08-04 18:30:00|       1|
+    |      484|2019-08-09 18:50:00|       0|
+    |     1115|2019-08-05 18:20:00|       1|
+    |     1115|2019-08-05 18:40:00|       0|
+    |     1115|2019-08-06 18:20:00|       1|
+    |     1115|2019-08-06 18:40:00|       0|
+    +---------+-------------------+--------+
+
+

@@ -1,0 +1,63 @@
+https://stackoverflow.com/questions/59198003
+
+I might not understand the OP's question right, but this is a good example using
+`USING` in the SQL which is missing from my notes.
+
+One way using two Window specs:
+    
+    from pyspark.sql.functions import when, col, lag, sum as fsum
+    from pyspark.sql import Window
+    
+    w1 = Window.partitionBy('USER_ID').orderBy('ID')
+    w2 = Window.partitionBy('USER_ID').orderBy('g')
+    
+    # create a new sub-group label based on the values of ADDRESS and Previous ADDRESS
+    df1 = df.withColumn('g', fsum(when(col('ADDRESS') == lag('ADDRESS').over(w1), 0).otherwise(1)).over(w1))
+    
+    # group by USER_ID and the above sub-group label and calculate the sum of time in the group as diff
+    # calculate the last_diff and then join the data back to the df1
+    df2 = df1.groupby('USER_ID', 'g').agg(fsum('Time').alias('diff')).withColumn('last_diff', lag('diff').over(w2))
+    
+    df1.join(df2, on=['USER_ID', 'g']).show()                                                                          
+    +-------+---+---+-------+----+----+---------+                                   
+    |USER_ID|  g| ID|ADDRESS|TIME|diff|last_diff|
+    +-------+---+---+-------+----+----+---------+
+    |      1|  1|  1|      A|  10|  10|     null|
+    |      1|  2|  2|      B|  15|  15|       10|
+    |      1|  3|  3|      A|  20| 105|       15|
+    |      1|  3|  4|      A|  40| 105|       15|
+    |      1|  3|  5|      A|  45| 105|       15|
+    +-------+---+---+-------+----+----+---------+
+    
+    df_new = df1.join(df2, on=['USER_ID', 'g']).drop('g', 'diff')
+
+Using Spark SQL: 
+
+    df.createOrReplaceTempView('df_table')
+
+    spark.sql("""
+
+        WITH t1 AS (
+               SELECT *, SUM(IF(ADDRESS = lag(ADDRESS) OVER w1, 0, 1)) OVER (w1) AS g
+               FROM df_table
+               WINDOW w1 AS ( Partition By USER_ID Order By ID )
+           )
+           , t2 AS (
+               SELECT USER_ID, g, SUM(TIME) as diff
+               FROM t1
+               GROUP BY USER_ID, g
+           )
+           , t3 AS (
+               SELECT *
+               , lag(diff) OVER (Partition By USER_ID Order By g) AS last_diff 
+               FROM t2
+           )
+           SELECT t1.USER_ID
+           ,      t1.ID
+           ,      t1.ADDRESS
+           ,      t1.TIME
+           ,      t3.last_diff
+           FROM t1 JOIN t3 USING(USER_ID, g)
+
+    """).show()
+
