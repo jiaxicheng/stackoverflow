@@ -1,0 +1,30 @@
+https://stackoverflow.com/questions/59031715/i-want-to-do-the-same-transformation-in-python-as-i-did-in-scala/59034327#59034327
+
+One way with RDD is to use a `list comprehension` to strip, split and convert the String into a key-value pair,
+with Country as key and a tuple of numbers as value. Since we use list comprehension, so we take `flatMap`
+on the RDD element, then use `reduceByKey` to do the calculation and `mapValues` to
+convert the resulting tuple back into string:
+
+    rdd1 = sc.parallelize([
+        '[Canada,47;97;33;94;6]', '[Canada,59;98;24;83;3]', '[Canada,77;63;93;86;62]'
+    ])
+
+    rdd1.flatMap(lambda x: [ (e[0], tuple(map(int,e[1].split(';')))) for e in [x.strip('][').split(',')] ]) \
+        .reduceByKey(lambda x,y: tuple([ x[i]+y[i] for i in range(len(x))]) ) \
+        .mapValues(lambda x: ';'.join(map(str,x))) \
+        .collect()
+
+**After flatMap():**
+
+    [('Canada', (47, 97, 33, 94, 6)),
+     ('Canada', (59, 98, 24, 83, 3)),
+     ('Canada', (77, 63, 93, 86, 62))]
+
+**After reduceByKey():**
+
+    [('Canada', (183, 258, 150, 263, 71))]
+
+**After mapValues():**
+
+    [('Canada', '183;258;150;263;71')]
+
