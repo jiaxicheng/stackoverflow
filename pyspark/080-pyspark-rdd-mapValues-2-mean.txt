@@ -1,0 +1,33 @@
+https://stackoverflow.com/questions/59222112/pyspark-rdd-aggregate-different-value-fields-differently
+    
+
+One way to use map function to convert the first value to 1 (to count) and then use reduceByKey to 
+sum each values with the same key, finally, use mapValues to calculate mean values except the 
+first one which is the count(keep as-is).
+
+    rdd.map(lambda x: (x[0], (1, *x[1][1:]))) \
+       .reduceByKey(lambda x,y: tuple([x[i]+y[i] for i in range(len(x))])) \
+       .mapValues(lambda x: (x[0], *[ e/x[0] for e in x[1:]])) 
+
+**After map():**
+
+    [('2014-06', (1, 5.5, 6.5, 7.5, 10.5)),
+     ('2014-07', (1, 636636.53, 0.53252, 5252.112, 5242.23)),
+     ('2014-06', (1, 1, 2, 4.5, 5.5)),
+     ('2014-07', (1, 536363.6363, 536336.6363, 3563.63636, 9.646446464646464))]
+
+**After reduceByKey():**
+
+    [('2014-06', (2, 6.5, 8.5, 12.0, 16.0)),
+     ('2014-07',
+      (2, 1173000.1663000002, 536337.16882, 8815.74836, 5251.876446464646))]
+
+**After mapValues():**
+
+    [('2014-06', (2, 3.25, 4.25, 6.0, 8.0)),
+     ('2014-07',
+      (2, 586500.0831500001, 268168.58441, 4407.87418, 2625.938223232323))]
+
+
+
+
