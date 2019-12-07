@@ -29,5 +29,10 @@ first one which is the count(keep as-is).
       (2, 586500.0831500001, 268168.58441, 4407.87418, 2625.938223232323))]
 
 
+Notes: For python-2, *x[1][1:] does not work, adjust to the folloing:
 
+    rdd.map(lambda x: (x[0], (1,)+ tuple(x[1][1:]))) \
+       .reduceByKey(lambda x,y: tuple([x[i]+y[i] for i in range(len(x))])) \
+       .mapValues(lambda x: (x[0],) + tuple([e/x[0] for e in x[1:]]))
+       
 
