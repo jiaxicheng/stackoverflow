@@ -5,9 +5,12 @@ One way to use map function to convert the first value to 1 (to count) and then 
 sum each values with the same key, finally, use mapValues to calculate mean values except the 
 first one which is the count(keep as-is).
 
+    from operator import add
+
     rdd.map(lambda x: (x[0], (1, *x[1][1:]))) \
-       .reduceByKey(lambda x,y: tuple([x[i]+y[i] for i in range(len(x))])) \
+       .reduceByKey(lambda x,y: tuple(map(add, x, y))) \
        .mapValues(lambda x: (x[0], *[ e/x[0] for e in x[1:]])) 
+
 
 **After map():**
 
