@@ -1,0 +1,56 @@
+
+https://stackoverflow.com/questions/59211921/convert-csv-dict-column-into-rows-pyspark
+
+This is an old question I did not find a answer in 2018 and now it has and it's simple:
+--
+Use from_json() and schema = 'map<string,int>'
+This is when the keys are random and not able to be specified in the schema, using mapType for from_json()
+fixed it.
+
+---
+
+Sample data:
+---
+id,cbgs 
+sg:bd1f26e681264baaa4b44083891c886a,"{""060372623011"":166,""060372655203"":70,""060377019021"":34}" sg:04c7f777f01c4c75bbd9e43180ce811f,"{""060372073012"":7}"
+
+    from pyspark.sql.functions import from_json, explode
+
+    df = spark.read.csv('/home/xicheng/test/csv-3.txt', escape='"', multiLine=True, header=True)
+
+    df.withColumn('cbgs', from_json('cbgs', 'map<string,int>')).show(truncate=False) 
+    +-----------------------------------+-------------------------------------------------------------+
+    |id                                 |cbgs                                                         |
+    +-----------------------------------+-------------------------------------------------------------+
+    |sg:bd1f26e681264baaa4b44083891c886a|[060372623011 -> 166, 060372655203 -> 70, 060377019021 -> 34]|
+    |sg:04c7f777f01c4c75bbd9e43180ce811f|[060372073012 -> 7]                                          |
+    +-----------------------------------+-------------------------------------------------------------+
+
+    df.select('Id', explode(from_json('cbgs', 'map<string,int>')).alias('cbgs', 'value')).show(truncate=False)         
+    +-----------------------------------+------------+-----+
+    |Id                                 |cbgs        |value|
+    +-----------------------------------+------------+-----+
+    |sg:bd1f26e681264baaa4b44083891c886a|060372623011|166  |
+    |sg:bd1f26e681264baaa4b44083891c886a|060372655203|70   |
+    |sg:bd1f26e681264baaa4b44083891c886a|060377019021|34   |
+    |sg:04c7f777f01c4c75bbd9e43180ce811f|060372073012|7    |
+    +-----------------------------------+------------+-----+
+
+The Old question:
+
+
+    df2 = spark.createDataFrame(
+        [(1123798, """[{"1123798":"Other, poets"},{"1112194":"Poetry for kids"}]""")],
+         ("catalogid", "catalogpath")
+    )
+
+    df2.withColumn('cats', explode(from_json('catalogpath', 'array<map<string,string>>'))) \
+       .select('catalogid', explode('cats').alias('catalog_id','catalog_desc')) \
+       .show()
+    +---------+----------+---------------+
+    |catalogid|catalog_id|   catalog_desc|
+    +---------+----------+---------------+
+    |  1123798|   1123798|   Other, poets|
+    |  1123798|   1112194|Poetry for kids|
+    +---------+----------+---------------+
+
