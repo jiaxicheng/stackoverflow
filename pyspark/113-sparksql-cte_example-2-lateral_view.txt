@@ -1,0 +1,59 @@
+For the question https://stackoverflow.com/questions/59259609/spark-json-iteration
+
+Use lateral View + CTE: example JSON text see the above stackoverflow post.
+
+    df = spark.read.json('/home/xicheng/test/json-15.txt', multiLine=True) 
+
+    df.createOrReplaceTempView('df_table')
+
+    spark.sql(""" 
+
+        WITH t1 AS ( 
+            SELECT m.model 
+            ,      translate(m.dealerspot[0].dealername[0], '"', '') as dealername 
+            ,      split(m.make, "[^\\\\w]+") AS make 
+            FROM df_table LATERAL VIEW OUTER inline(CarBrands) m 
+        ) 
+        SELECT model 
+        ,      make[2] AS year 
+        ,      make[6] AS condition 
+        ,      make[5] AS cond_operator 
+        ,      make[10] AS resale 
+        ,      make[9] AS resale_operator 
+        ,      dealername 
+        FROM t1  
+                                                                             
+     """).show() 
+    +-----+----+---------+-------------+------+---------------+----------+
+    |model|year|condition|cond_operator|resale|resale_operator|dealername|
+    +-----+----+---------+-------------+------+---------------+----------+
+    | audi|2009|        Y|           in|  2015|             in|     first|
+    |  bmw|2010|        N|           OR|  2016|             in|    sports|
+    |  toy|2013|        Y|           in|  2018|             in|    nelson|
+    +-----+----+---------+-------------+------+---------------+----------+
+
+with Scala:
+
+    val df = spark.read.option("multiLine", "true").json("file:///home/hdfs/test/pyspark/json-15.txt")
+
+    df.createOrReplaceTempView("df_table")
+
+    spark.sql(""" 
+
+        WITH t1 AS ( 
+            SELECT m.model 
+            ,      translate(m.dealerspot[0].dealername[0], '"', '') as dealername 
+            ,      split(m.make, "[^\\w]+") AS make 
+            FROM df_table LATERAL VIEW OUTER inline(CarBrands) m 
+        ) 
+        SELECT model 
+        ,      make[2] AS year 
+        ,      make[6] AS condition 
+        ,      make[5] AS cond_operator 
+        ,      make[10] AS resale 
+        ,      make[9] AS resale_operator 
+        ,      dealername 
+        FROM t1  
+                                                                             
+     """).show
+
