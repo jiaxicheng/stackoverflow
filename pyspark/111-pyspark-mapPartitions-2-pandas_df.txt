@@ -1,0 +1,28 @@
+Examples using repartition + mapPartitions:
+---
+
+Example-1: returnning Pandas Dataframe:
+  REF: https://stackoverflow.com/questions/59262543/pyspark-convert-result-of-mappartitions-to-spark-dataframe
+
+   At the end of the function in mapPartitions, a Pandas dataframe is generated and need the result to be a Spark Dataframe
+
+     rdd = sp_df.repartition(n_partitions, partition_key).rdd.mapPartitions(lambda x: some_function(x))
+
+  Solution: use pyspark.sql.Row
+
+     from pyspark.sql import Row
+
+     def some_function(x):
+       pdf = func(x)
+
+       # convert Pandsa df into list of Row objects
+       PRow = Row(*pdf.columns)
+       for x in pdf.values:
+         yield PRow(*x)
+
+       #below return a full list is not as efficient as a generator:
+       #return [*map(lambda x: PRow(*x), pdf.values)]
+
+  Note: use pdf.to_numpy() instead of pdf.values for Spark 0.24+
+
+
