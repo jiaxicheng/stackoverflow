@@ -1,0 +1,49 @@
+https://stackoverflow.com/questions/59277762/spark-dataframe-string-iteration-in-spark    
+
+CTE example: split + split + explode + explode
+
+
+    s1 = "(car == \"BMW\" AND country in  (\"UK\",\"US\")  AND dcode in  (\"1\",\"8\",\"121\")  AND lnum == \"xy123ybg\")"
+    s2 = "(car == \"AUDI\" AND country not in  (\"CH\",\"IN\")  AND dcode == ( \"5\")  AND lnum == \"mkdf864\")" 
+    s3 = "(car == \"Tesla\" AND country in  (\"ZW\")  AND dcode in (\"9\",\"12\")  AND lnum == \"vy6y78\")"
+
+    df = spark.createDataFrame([(e,) for e in [s1,s2,s3]])
+
+    df.createOrReplaceTempView('df_table')
+    
+    df1 = spark.sql("""
+    
+        WITH t1 AS (
+            select split(translate(_1, '()"', ''), '\\\\s+(AND)\\\\s+') as d1
+            ,      IF(locate('country not in', lower(_1)) > 0, 'not in', 'in') AS ctry_op
+            from df_table
+        ), t2 AS (
+            SELECT split(d1[0], '==')[1] AS car
+            ,      split(split(d1[1], 'in\\\\s+')[1], IF(ctry_op = 'in', ',\\\\s*', '^')) AS countries
+            ,      ctry_op
+            ,      explode(split(split(d1[2], '(?:in|==)\\\\s+')[1], ',\\\\s*')) AS decode
+            ,      IF(locate('==', d1[2]) > 0, '==', 'in') decode_op
+            ,      split(d1[3], '==\\\\s*')[1] AS lnum
+            FROM t1
+        )
+        SELECT car, explode(countries) AS ctry, ctry_op, decode, decode_op, lnum
+        FROM t2
+    
+     """).show()
+    +------+-----+-------+------+---------+--------+
+    |   car| ctry|ctry_op|decode|decode_op|    lnum|
+    +------+-----+-------+------+---------+--------+
+    |   BMW|   UK|     in|     1|       in|xy123ybg|
+    |   BMW|   US|     in|     1|       in|xy123ybg|
+    |   BMW|   UK|     in|     8|       in|xy123ybg|
+    |   BMW|   US|     in|     8|       in|xy123ybg|
+    |   BMW|   UK|     in|   121|       in|xy123ybg|
+    |   BMW|   US|     in|   121|       in|xy123ybg|
+    |  AUDI|CH,IN| not in|     5|       ==| mkdf864|
+    | Tesla|   ZW|     in|     9|       in|  vy6y78|
+    | Tesla|   ZW|     in|    12|       in|  vy6y78|
+    +------+-----+-------+------+---------+--------+
+
+
+    
+    
