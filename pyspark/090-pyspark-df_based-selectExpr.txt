@@ -1,0 +1,49 @@
+https://stackoverflow.com/questions/59300592/creating-function-in-pyspark-for-multiple-operations-in-multiple-moving-windows
+
+function using Spark SQL selectExpr to parameterize creating dataframe fields:
+
+    def get_synthetics(df, ops_cols, ops, win_weeks, order_cols):
+      
+      win_specs, select_exprs = {}, []
+
+      # set up Window Specs based on the list of win_weeks
+      for wk in win_weeks:
+        win_specs[wk] = f"""
+            
+            PARTITION BY cd
+            ORDER BY timestamp(week_strt_date)
+            RANGE BETWEEN interval {wk} WEEK PRECEDING and CURRENT ROW
+            
+        """
+
+      # create SQL expression for each combinations of ops, ops_col and win_weeks:
+      for op in ops:
+        for oc in ops_cols:
+          for wk in win_weeks:
+            select_exprs += [f'{op}({oc}) OVER ({win_specs[wk]}) AS `{wk} week moving {op} of {oc}`']
+
+      return df.selectExpr(['cd', 'week_strt_date', 'spend'] + select_exprs).orderBy(order_cols)
+      #return ['cd', 'week_strt_date'] + select_exprs
+
+    aa = get_synthetics(
+          df=data
+        , ops_cols=['spend', 'no_trx']
+        , ops=['avg', 'std']
+        , win_weeks=[4, 6]
+        , order_cols=['cd', 'week_strt_date']
+    )
+
+    aa.printSchema()                                                                                                     
+    root
+     |-- cd: string (nullable = true)
+     |-- week_strt_date: string (nullable = true)
+     |-- spend: long (nullable = true)
+     |-- 4 week moving avg of spend: double (nullable = true)
+     |-- 6 week moving avg of spend: double (nullable = true)
+     |-- 4 week moving avg of no_trx: double (nullable = true)
+     |-- 6 week moving avg of no_trx: double (nullable = true)
+     |-- 4 week moving std of spend: double (nullable = true)
+     |-- 6 week moving std of spend: double (nullable = true)
+     |-- 4 week moving std of no_trx: double (nullable = true)
+     |-- 6 week moving std of no_trx: double (nullable = true)
+
