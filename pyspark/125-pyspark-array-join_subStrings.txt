@@ -1,0 +1,63 @@
+https://stackoverflow.com/questions/59374628
+
+String manipulation of array columns:
+
+Method-1: for Spark 2.4+, use array_join + transform 
+
+    from pyspark.sql.functions import expr
+
+    df.withColumn('new_list', expr("""
+        array_join(
+            transform(col1, x -> concat(right(x.departure,5), '_', right(x.arrival,5)))
+          , '_'
+        )
+      """) 
+    ).show(truncate=False)
+
+    Similar problem: https://stackoverflow.com/questions/59376353
+
+      df.withColumn('message', expr("array_join(transform(data, x -> x.message), ',')"))
+
+
+Method-2: before Spark 2.4, use udf:
+
+    from pyspark.sql.functions import udf
+    from pyspark.sql.types import StringType 
+
+    udf_array_join = udf(arrays_join, StringType())
+
+    def arrays_join(arr):
+        return '_'.join('{}_{}'.format(x.departure[-5:], x.arrival[-5:]) for x in arr) if isinstance(arr, list) else arr
+
+
+Method-3: use explode + groupby + collect_list
+
+    from pyspark.sql.functions import monotonically_increasing_id, posexplode, regexp_replace
+    
+    (df.withColumn('id', monotonically_increasing_id()) 
+        .select('*', posexplode('col1').alias('pos', 'col2')) 
+        .select('id', 'pos', 'col2.*') 
+        .selectExpr('id', "concat(pos, '+', right(departure,5), '_', right(arrival,5)) as dt") 
+        .groupby('id') 
+        .agg(expr("concat_ws('_', sort_array(collect_list(dt))) as new_list")) 
+        .select(regexp_replace('new_list', r'(?:^|(?<=_))\d+\+', '').alias('new_list')) 
+        .show(truncate=False))
+    
+
+Method-4: use string operations:
+
+convert array into string and split it based on `[^0-9 :-]+`, concatenate the array items with '_'
+and then do regexp_replace and trim to get desired sub-strings:
+
+    from pyspark.sql.functions import regexp_replace, concat_ws, split, col
+
+    (df.select(
+        regexp_replace(
+            concat_ws('_', split(col('col1').astype('string'), r'[^0-9 :-]+'))
+          , r'[_ ]+\d\d\d\d-\d\d-\d\d '
+          , '_'
+        ).alias('new_list')
+    ).selectExpr('trim(both "_" from new_list) as new_list') 
+    .show(truncate=False))
+
+
