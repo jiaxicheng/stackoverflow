@@ -1,0 +1,97 @@
+https://stackoverflow.com/questions/59071650/groupby-and-aggregation-based-on-latest-timestamp
+    
+To sort out the data, create a temporary column `IF(Section is not null, Time, null)` so that
+the rows are ordered firstly based on the *Time* when Section is Null and then the *Time* when 
+Section is not NULL. the function desc() is null last by default.
+    
+Method-1: using pyspark
+
+    from pyspark.sql.functions import row_number, desc, expr
+    from pyspark.sql import Window
+    
+    # convert Pandas df to Spark df and replace EMPTY with null
+    sdf = spark.createDataFrame(df).replace('', None)
+
+    # Window Spec
+    w1 = Window.partitionBy('Name', 'Class').orderBy(desc('tmp_col'), desc('Time'))
+    
+
+    df_new = (sdf.withColumn('tmp_col', expr("IF(Section is not null, Time, null)")) 
+        .withColumn('rn', row_number().over(w1)) 
+        .where('rn=1'))
+    
+    df_new.show()
+    +------+-----+-------+----+-------+---+                                           
+    |  Name|Class|Section|Time|tmp_col| rn|
+    +------+-----+-------+----+-------+---+
+    |Suresh|   12|   null|  20|   null|  1|
+    |Ramesh|   12|      D|  17|     17|  1|
+    |  Andy|   10|      B|  12|     12|  1|
+    +------+-----+-------+----+-------+---+
+    
+    df_new = df_new.drop('tmp_col', 'rn')
+    
+
+Method-2: using Spark SQL:
+    
+    sdf.createOrReplaceTempView("df_table")
+    
+    spark.sql("""
+    
+        WITH t1 AS (
+            SELECT *
+            ,      IF(Section is not null or Section != '', Time, null) AS tmp_col
+            FROM df_table
+        ), t2 AS (
+            SELECT *
+            ,      row_number() OVER (Partition By Name, Class ORDER BY tmp_col DESC, Time DESC) as rn
+            FROM t1
+        )
+        SELECT Name
+        ,      Class
+        ,      Section
+        ,      Time
+        FROM t2
+        WHERE rn = 1
+    
+    """).show()
+
+
+Method-3: Using scala:
+
+    import org.apache.spark.sql.expressions.Window
+    import org.apache.spark.sql.functions.{expr,row_number}
+
+    val df = Seq(
+            ("Andy", "10", "B", 12)
+          , ("Andy", "10", "", 13)
+          , ("Ramesh", "12", "C", 15)
+          , ("Ramesh", "12", "D", 17)
+          , ("Suresh", "12", "", 19)
+          , ("Suresh", "12", "", 20)
+        ).toDF("Name", "Class", "Section", "Time")
+    
+
+    val w1 = Window.partitionBy("Name", "Class").orderBy(desc("tmp_col"), desc("Time"))
+
+    val df_new = (df.withColumn("tmp_col", expr("IF(Section is null or Section = '', null, Time)"))
+        .withColumn("rn", row_number().over(w1))
+        .filter("rn = 1"))
+
+    df_new.show
+    +------+-----+-------+----+-------+---+                                         
+    |  Name|Class|Section|Time|tmp_col| rn|
+    +------+-----+-------+----+-------+---+
+    |Ramesh|   12|      D|  17|     17|  1|
+    |  Andy|   10|      B|  12|     12|  1|
+    |Suresh|   12|       |  20|   null|  1|
+    +------+-----+-------+----+-------+---+
+
+    # below use when/otherwise instead of expr
+    import org.apache.spark.sql.functions.{when,row_number}
+
+    val new_df = (df.withColumn("tmp_col", when($"Section".isNull || ($"Section" === ""), null).otherwise($"Time"))
+        .withColumn("rn", row_number().over(w1))
+        .filter("rn = 1"))
+
+
