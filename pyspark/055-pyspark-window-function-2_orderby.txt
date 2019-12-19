@@ -1,8 +1,8 @@
 https://stackoverflow.com/questions/59071650/groupby-and-aggregation-based-on-latest-timestamp
     
-To sort out the data, create a temporary column `IF(Section is not null, Time, null)` so that
-the rows are ordered firstly based on the *Time* when Section is Null and then the *Time* when 
-Section is not NULL. the function desc() is null last by default.
+To sort out the data, create a temporary column `IF(Section is null or Section = '', null, Time)` 
+so that the rows are ordered firstly based on the *Time* when Section is Null and then the *Time* 
+when Section is not NULL. the function desc() is null last by default.
     
 Method-1: using pyspark
 
@@ -10,21 +10,20 @@ Method-1: using pyspark
     from pyspark.sql import Window
     
     # convert Pandas df to Spark df and replace EMPTY with null
-    sdf = spark.createDataFrame(df).replace('', None)
+    sdf = spark.createDataFrame(df)
 
     # Window Spec
     w1 = Window.partitionBy('Name', 'Class').orderBy(desc('tmp_col'), desc('Time'))
     
-
-    df_new = (sdf.withColumn('tmp_col', expr("IF(Section is not null, Time, null)")) 
+    df_new = (sdf.withColumn('tmp_col', expr("IF(Section is null or Section = '', null, Time)")) 
         .withColumn('rn', row_number().over(w1)) 
         .where('rn=1'))
     
     df_new.show()
-    +------+-----+-------+----+-------+---+                                           
+    +------+-----+-------+----+-------+---+                                         
     |  Name|Class|Section|Time|tmp_col| rn|
     +------+-----+-------+----+-------+---+
-    |Suresh|   12|   null|  20|   null|  1|
+    |Suresh|   12|       |  20|   null|  1|
     |Ramesh|   12|      D|  17|     17|  1|
     |  Andy|   10|      B|  12|     12|  1|
     +------+-----+-------+----+-------+---+
@@ -60,21 +59,20 @@ Method-2: using Spark SQL:
 Method-3: Using scala:
 
     import org.apache.spark.sql.expressions.Window
-    import org.apache.spark.sql.functions.{expr,row_number}
+    import org.apache.spark.sql.functions.{when,row_number}
 
     val df = Seq(
             ("Andy", "10", "B", 12)
-          , ("Andy", "10", "", 13)
+          , ("Andy", "10", null, 13)
           , ("Ramesh", "12", "C", 15)
           , ("Ramesh", "12", "D", 17)
-          , ("Suresh", "12", "", 19)
-          , ("Suresh", "12", "", 20)
+          , ("Suresh", "12", null, 19)
+          , ("Suresh", "12", null, 20)
         ).toDF("Name", "Class", "Section", "Time")
     
-
     val w1 = Window.partitionBy("Name", "Class").orderBy(desc("tmp_col"), desc("Time"))
 
-    val df_new = (df.withColumn("tmp_col", expr("IF(Section is null or Section = '', null, Time)"))
+    var df_new = (df.withColumn("tmp_col", when($"Section".isNotNull, $"Time"))
         .withColumn("rn", row_number().over(w1))
         .filter("rn = 1"))
 
@@ -84,14 +82,21 @@ Method-3: Using scala:
     +------+-----+-------+----+-------+---+
     |Ramesh|   12|      D|  17|     17|  1|
     |  Andy|   10|      B|  12|     12|  1|
-    |Suresh|   12|       |  20|   null|  1|
+    |Suresh|   12|   null|  20|   null|  1|
     +------+-----+-------+----+-------+---+
 
-    # below use when/otherwise instead of expr
-    import org.apache.spark.sql.functions.{when,row_number}
+    df_new = df_new.drop("tmp_col", "rn")
 
-    val new_df = (df.withColumn("tmp_col", when($"Section".isNull || ($"Section" === ""), null).otherwise($"Time"))
-        .withColumn("rn", row_number().over(w1))
-        .filter("rn = 1"))
+Method-4: using Pandas
 
+    import pandas as pd
+    import numpy as np
+
+    df['tmp_col'] = np.where(df.Section.eq('') | df.Section.isna(), None, df.Time)
+    df.sort_values(['tmp_col', 'Time'], ascending=[0,0]).drop_duplicates(subset=['Name', 'Class'])
+
+    #     Name  Class Section  Time tmp_col
+    #3  Ramesh     12       D    17      17
+    #0    Andy     10       B    12      12
+    #5  Suresh     12            20    None
 
