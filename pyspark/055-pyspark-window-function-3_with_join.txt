@@ -1,0 +1,110 @@
+https://stackoverflow.com/questions/59429032/find-the-start-time-and-end-time-when-temperature-is-changed-1degree-in-spark-sq
+    
+    from pyspark.sql.functions import lag, expr, sum as fsum, col, when, coalesce, lit
+    from pyspark.sql import Window
+    
+    df = spark.read.csv('/home/xicheng/test/window-7.txt', header=True, inferSchema=True)
+    
+Step-1: find sequence of Rows which have Temp drop monotonically for the same ID, we created
+   a sub-group label `g` and use is_fallen flag and g_is_fallen, keep only Rows with g_is_fallen is true
+
+    w1 = Window.partitionBy('ID').orderBy('TimeStamp')
+    w2 = Window.partitionBy('ID', 'g')
+    
+    df1 = (df.withColumn('is_fallen', coalesce(lag('Temp(F)').over(w1) > col('Temp(F)'),lit(True))) 
+        .withColumn('g', fsum(when(col('is_fallen'),0).otherwise(1)).over(w1)) 
+        .withColumn('g_is_fallen', fmax('is_fallen').over(w2)) 
+        .filter('g_is_fallen'))
+           
+    df1.show()
+    +---+-------------------+-------+---------+---+-----------+                     
+    | ID|          TimeStamp|Temp(F)|is_fallen|  g|g_is_fallen|
+    +---+-------------------+-------+---------+---+-----------+
+    |  1|2019-12-20 10:08:35|   74.1|     true|  0|       true|
+    |  1|2019-12-20 10:09:37|   73.7|     true|  0|       true|
+    |  1|2019-12-20 10:10:32|   73.5|     true|  0|       true|
+    |  1|2019-12-20 10:12:02|   73.0|     true|  0|       true|
+    |  1|2019-12-20 10:13:35|   73.3|    false|  1|       true|
+    |  1|2019-12-20 10:14:37|   73.0|     true|  1|       true|
+    |  1|2019-12-20 10:15:43|   72.7|     true|  1|       true|
+    |  1|2019-12-20 10:16:47|   72.4|     true|  1|       true|
+    |  1|2019-12-20 10:17:57|   72.0|     true|  1|       true|
+    |  3|2019-12-20 10:09:40|   74.0|     true|  0|       true|
+    |  3|2019-12-20 10:15:42|   72.7|     true|  0|       true|
+    |  2|2019-12-20 10:08:40|   74.3|     true|  0|       true|
+    |  2|2019-12-20 10:09:40|   74.2|     true|  0|       true|
+    |  2|2019-12-20 10:12:40|   73.3|     true|  0|       true|
+    |  2|2019-12-20 10:13:40|   73.1|     true|  0|       true|
+    |  2|2019-12-20 10:14:40|   72.9|     true|  0|       true|
+    |  2|2019-12-20 10:16:40|   72.5|     true|  0|       true|
+    |  2|2019-12-20 10:17:40|   72.3|     true|  0|       true|
+    |  2|2019-12-20 10:18:40|   72.0|     true|  0|       true|
+    |  2|2019-12-20 10:22:50|   73.0|    false|  3|       true|
+    +---+-------------------+-------+---------+---+-----------+
+    
+Step-2: for those with exact 1 degree drop, we just need to take a self-join
+   for the same ID in the same sub-group-label `g` and find any with 1 degree difference
+   Note: The current solution might have overlap between two Timestamps. If overlapping is not allowed
+     you can use groupby + collect_set + array_sort + aggregate to removed unwanted, see example
+     in the following link:
+
+       https://github.com/jiaxicheng/bigdata/blob/master/pyspark/notes/n053-window_with_gaps_using_aggregate.txt
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++#
+          Task - Exact 1 degree diff
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++#
+    
+    df1.alias('d1').join(
+        df1.alias('d2'), 
+        expr("d2.`Temp(F)` = d1.`Temp(F)` + 1.0 AND d1.ID = d2.ID AND d1.g = d2.g")
+    ).selectExpr(
+        'd1.ID as ID', 
+        'd2.TimeStamp as Start_Time', 
+        'd1.TimeStamp as End_Time'
+    ).show()                         
+    +---+-------------------+-------------------+                                   
+    | ID|         Start_Time|           End_Time|
+    +---+-------------------+-------------------+
+    |  1|2019-12-20 10:14:37|2019-12-20 10:17:57|
+    |  2|2019-12-20 10:08:40|2019-12-20 10:12:40|
+    |  2|2019-12-20 10:12:40|2019-12-20 10:17:40|
+    +---+-------------------+-------------------+
+    
+
+The above can also be written as Spark SQL:
+---
+
+    df.createOrReplaceTempView('df_table')
+    
+    spark.sql("""
+    
+        WITH t1 AS (
+            SELECT *, coalesce(lag(`Temp(F)`) OVER (Partition By ID ORDER BY TimeStamp) > `Temp(F)`, True) AS is_fallen
+            FROM df_table
+        ), t2 AS (
+            SELECT *, sum(IF(is_fallen,0,1)) OVER (Partition By ID ORDER BY TimeStamp) AS g FROM t1
+        ), t3 AS (
+            SELECT *, max(is_fallen) over (Partition By ID, g) as g_is_fallen FROM t2
+        ), t4 AS (
+            SELECT ID, TimeStamp, `Temp(F)`, g FROM t3 WHERE g_is_fallen
+        )
+        SELECT d1.ID as ID
+        ,      d1.TimeStamp as Start_Time
+        ,      d2.TimeStamp as End_Time
+        ,      d1.`Temp(F)` as Start_Temp
+        ,      d2.`Temp(F)` as End_Temp
+        FROM t4 AS d1 JOIN t4 AS d2 USING (ID, g)
+        WHERE d1.`Temp(F)` = d2.`Temp(F)` + 1.0
+    
+    
+    """).show()
+    +---+-------------------+-------------------+----------+--------+               
+    | ID|         Start_Time|           End_Time|Start_Temp|End_Temp|
+    +---+-------------------+-------------------+----------+--------+
+    |  1|2019-12-20 10:14:37|2019-12-20 10:17:57|      73.0|    72.0|
+    |  2|2019-12-20 10:08:40|2019-12-20 10:12:40|      74.3|    73.3|
+    |  2|2019-12-20 10:12:40|2019-12-20 10:17:40|      73.3|    72.3|
+    +---+-------------------+-------------------+----------+--------+
+    
+    
+    
