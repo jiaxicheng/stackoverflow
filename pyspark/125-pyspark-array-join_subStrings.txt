@@ -2,6 +2,11 @@ https://stackoverflow.com/questions/59374628
 
 String manipulation of array columns:
 
+    r = [Row(arrival='2019-12-25 19:55', departure='2019-12-25 18:22'),
+         Row(arrival='2019-12-26 14:56', departure='2019-12-26 08:52')]
+
+    df = spark.createDataFrame([(r,)], ['col1'])
+
 Method-1: for Spark 2.4+, use array_join + transform 
 
     from pyspark.sql.functions import expr
