@@ -1,0 +1,36 @@
+https://stackoverflow.com/questions/59490214/check-set-of-a-field-values-mapped-against-another-single-field-value-in-datafra?noredirect=1#59490214
+
+For Spark 2.4+, join based on array_except + size: 
+
+    from pyspark.sql.functions import collect_set, lit, array, size, array_except
+
+    df = spark.read.csv('/home/xicheng/test/groupby-2.txt', header=True)
+
+    List_wanted = ["B11", "B15"]
+    wanted = array([lit(e) for e in List_wanted])
+
+    df1 = df.groupby('storename').agg(collect_set('book').alias('books'))
+    df2 = df1.filter(size(array_except(wanted, 'books')) == 0).select('storename')
+    df.join(df2, on='storename').show()
+    +---------+----+-----+                                                          
+    |storename|book|price|
+    +---------+----+-----+
+    |       S1| B11|  10$|
+    |       S1| B15|  29$|
+    |       S1| B09|  21$|
+    +---------+----+-----+
+
+
+The same logic written in Scala:
+
+    import org.apache.spark.sql.functions.{collect_set, lit, array, size, array_except}
+
+    val df = spark.read.option("header","true").csv("/home/xicheng/test/groupby-2.txt")
+
+    val List_wanted = Seq("B11", "B15")
+    val wanted = array(List_wanted.map(lit(_)):_*)
+
+    val df1 = df.groupBy("storename").agg(collect_set("book").alias("books"))
+    val df2 = df1.where((size(wanted) > 0) && (size(array_except(wanted, $"books")) === 0)).select("storename")
+    df.join(df2, Seq("storename"), "inner").show
+
