@@ -1,0 +1,129 @@
+https://stackoverflow.com/questions/59487851/efficiently-running-a-for-loop-in-apache-spark-so-that-execution-is-parallel
+
+Find all combinations of a set(unique items) from an ArrayType column:
+
+Method-1: use LATERAL VIEW explode()
+
+Note: without a WHERE clause, multiple explode functions yield a crossJoin of two lists
+
+Using multiple explode() with Spark SQL `Lateral VIEW` to simulate Joins.
+This is easy to extend but performance might suffer for extensive use of the explode function:
+    
+    from pyspark.sql.functions import collect_set
+
+    df = spark.read.csv('/home/xicheng/test/join-6.txt', header=True)
+
+    df1 = df.groupby('bill_id').agg(collect_set('item_id').alias('items'))
+    
+    df1.createOrReplaceTempView("temp1")
+    
+    spark.sql(""" 
+      
+         WITH t1 AS ( 
+             SELECT array_sort(array(item_1,item_2)) new_items 
+             FROM temp1  
+             LATERAL VIEW EXPLODE(items) AS item_1 
+             LATERAL VIEW EXPLODE(items) AS item_2 
+             WHERE item_1 > item_2 
+         ), t2 AS ( 
+             SELECT new_items, count(*) AS Num_of_bills 
+             FROM t1 
+             GROUP BY new_items 
+         )    
+         SELECT new_items[0] AS item_1 
+         ,      new_items[1] AS item_2 
+         ,      Num_of_bills  
+         FROM t2 
+          
+     """).show()                                                                                                         
+    +------+------+------------+                                                    
+    |item_1|item_2|Num_of_bills|
+    +------+------+------------+
+    |     2|     3|           1|
+    |     1|     2|           2|
+    |     1|     3|           1|
+    +------+------+------------+
+
+SQL for 4-items:
+
+    df = spark.read.csv('/home/xicheng/test/join-6-1.txt', header=True)
+    df1 = df.groupby('bill_id').agg(collect_set('item_id').alias('items'))
+    df1.createOrReplaceTempView("temp1")
+    
+    spark.sql("""
+    
+        WITH t1 AS (
+            SELECT array_sort(array(item_1,item_2,item_3,item_4)) new_items
+            FROM temp1 
+            LATERAL VIEW EXPLODE(items) AS item_1 
+            LATERAL VIEW EXPLODE(items) AS item_2
+            LATERAL VIEW EXPLODE(items) AS item_3
+            LATERAL VIEW EXPLODE(items) AS item_4
+            WHERE item_1 > item_2 AND item_2 > item_3 AND item_3 > item_4
+        ), t2 AS (
+            SELECT new_items, count(*) AS Num_of_bills
+            FROM t1
+            GROUP BY new_items
+        )
+        SELECT new_items[0] AS item_1
+        ,      new_items[1] AS item_2
+        ,      new_items[2] AS item_3
+        ,      new_items[3] AS item_4
+        ,      Num_of_bills
+        FROM t2
+    
+    """).show()
+    +------+------+------+------+------------+                                      
+    |item_1|item_2|item_3|item_4|Num_of_bills|
+    +------+------+------+------+------------+
+    |     1|     2|     5|     6|           1|
+    |     1|     3|     4|     5|           2|
+    |     2|     3|     5|     6|           1|
+    |     1|     2|     3|     4|           2|
+    |     1|     3|     5|     6|           1|
+    |     1|     2|     4|     5|           2|
+    |     1|     2|     3|     5|           2|
+    |     1|     2|     3|     6|           1|
+    |     3|     4|     5|     6|           1|
+    |     2|     4|     5|     6|           1|
+    |     1|     3|     4|     6|           1|
+    |     1|     2|     4|     6|           1|
+    |     2|     3|     4|     5|           2|
+    |     1|     4|     5|     6|           1|
+    |     2|     3|     4|     6|           1|
+    +------+------+------+------+------------+
+
+    df1.show()
+    +-------+------------------+
+    |bill_id|             items|
+    +-------+------------------+
+    |    DEF|[3, 1, 2, 5, 4, 6]|
+    |    GHI|         [3, 1, 2]|
+    |    ABC|   [3, 1, 2, 5, 4]|
+    +-------+------------------+
+
+Method-2: Use inner Join
+
+Other way using regular join for 2-item combinations, this is not ease to extend to more items
+
+do a self join and find the combinations of item_id for the same bill_id, create a temporary array column
+with sorted item_ids, groupby this array column and then count the number of occurances:
+    
+    (df.alias('d1')
+        .join(df.alias('d2'), expr("d1.bill_id = d2.bill_id AND d1.item_id < d2.item_id"))
+        .select('d1.bill_id', sort_array(array('d1.item_id', 'd2.item_id')).alias('items'))
+        .groupby('items')
+        .count()
+        .selectExpr(
+            'items[0] as item_1'
+          , 'items[1] as item_2'
+          , 'count as Num_of_bills'
+    ).show())
+    +------+------+------------+                                                    
+    |item_1|item_2|Num_of_bills|
+    +------+------+------------+
+    |     2|     3|           1|
+    |     1|     2|           2|
+    |     1|     3|           1|
+    +------+------+------------+
+    
