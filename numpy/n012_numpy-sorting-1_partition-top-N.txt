@@ -1,0 +1,74 @@
+Use np.partition and np.argpartition to find top-N from an ndarray:
+https://docs.scipy.org/doc/numpy/reference/generated/numpy.partition.html
+---
+
+Sample data:
+
+    import pandas as pd
+    import numpy as np
+    from sklearn.datasets import load_iris
+    from pyspark.ml.feature import VectorAssembler
+    from pyspark.ml.classification import LogisticRegression 
+    from pyspark.ml import Pipeline
+
+    iris = load_iris()
+
+    pdf = pd.DataFrame(iris.data, columns=iris.feature_names)
+
+    pdf['target'] = iris.target
+    sdf = spark.createDataFrame(pdf)
+
+    vs = VectorAssembler(inputCols=iris.feature_names, outputCol='features')
+    lr = LogisticRegression(featuresCol='features', labelCol='target')
+    pipeline = Pipeline(stages=[vs, lr])
+
+    model = pipeline.fit(sdf)
+
+    LR_model = model.stages[-1]
+
+
+Example-1: Model extract top-N probablities from the model.summary.predictions.probability vector
+  REF: https://stackoverflow.com/questions/59464805/is-there-any-efficient-function-for-extractin
+
+    N = 10
+
+    from numpy import partition, arange
+
+    #retrieve top-N, but unsorted, adjust N to range(N) to make it sorted:
+    #  -partition(-row.probability.toArray(),arange(N))[:N]
+
+    extract = lambda row: (row.prediction,) + tuple(-partition(-row.probability.toArray(),arange(N))[:N])
+
+    LR_model.summary.predictions.rdd.map(extract).take(5)
+
+
+
+Example-2: take the top-N coefficients from each row LR_model.coefficientMatrix
+  REF: https://stackoverflow.com/questions/59456519/feature-importance-using-logistic-regression-in-pyspark
+  Note: coefficients alone is not enough to find the most importance features. this is only for an example
+        to use np.argpartition to find index or values of the top-N coefficients.
+
+    # find feature names from LR_model.summary.predictions.schema.jsonValue()
+    #   --> features --> metadata --> ml_attr' --> 'attrs' --> 'numeric'
+    fields_metadata_mapping = { f['name']:f['metadata'] for f in LR_model.summary.predictions.schema.jsonValue()['fields'] }
+    feature_names = [ f['name'] for f in fields_metadata_mapping['features']['ml_attr']['attrs']['numeric'] ]
+
+    a = LR_model.coefficientMatrix.toArray()
+
+    df_z = pd.DataFrame(
+        np.argpartition(-np.abs(a), np.arange(2),axis=1)[:,:2], 
+        columns=['top0', 'top1'], 
+        index=iris.target_names
+    ) 
+    df_z.applymap(lambda x: feature_names[x])
+    #                        top0               top1
+    #setosa      sepal width (cm)   petal width (cm)
+    #versicolor  sepal width (cm)  sepal length (cm)
+    #virginica   sepal width (cm)   petal width (cm)
+
+    # to retrieve the coefficients correpsoding to the above index/columns: 
+    #a[np.arange(len(a))[:,None],np.argpartition(-np.abs(a), np.arange(2),axis=1)[:,:2]]
+    #array([[ 39.14617118, -25.54131043],
+    #       [-16.2326791 ,   5.6897218 ],
+    #       [-22.91349208,  21.91365745]])
+
