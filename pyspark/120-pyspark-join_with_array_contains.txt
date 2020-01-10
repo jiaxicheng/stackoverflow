@@ -1,0 +1,62 @@
+https://stackoverflow.com/questions/59667652/how-to-iterate-over-an-array-column-in-pyspark-while-joining
+
+To map keys inside an Array into their corresponding values, take left_join using array_contains() as join
+condition. find all related key-values to `array_of_str` and convert them into a MapType column `result_mapping`
+and then use `transform` and `filter` function to convert `key`s in array_of_str into their 
+corresponding mapped `value`s.
+
+    
+    from pyspark.sql.functions import expr, first, collect_set, broadcast
+    
+    df_a = spark.createDataFrame([
+          ('John',['mongo','apple']), 
+          ('Tom', ['mongo','orange']), 
+          ('Matto',['apple','banana'])
+        ],['str1','array_of_str'])
+    
+    df_b = spark.createDataFrame([('mongo',1),('apple',2),('orange',3)],['key', 'value'])
+    
+    df_a.join( 
+        broadcast(df_b), 
+        expr("array_contains(array_of_str, key)"), 
+        "left" 
+     ).groupby('str1') \ 
+      .agg( 
+         first('array_of_str').alias('array_of_str'), 
+         expr("str_to_map(concat_ws(',',collect_set(concat_ws(':', key, value))),',',':')").alias('result_mapping')
+     ).selectExpr(
+        'str1', 
+        'array_of_str', 
+        'filter(transform(array_of_str, x -> result_mapping[x]), y -> y is not null) as joined_result'
+     ).show()                   
+    +-----+---------------+-------------+                                           
+    | str1|   array_of_str|joined_result|
+    +-----+---------------+-------------+
+    |  Tom|[mongo, orange]|       [1, 3]|
+    | John| [mongo, apple]|       [1, 2]|
+    |Matto|[apple, banana]|          [2]|
+    +-----+---------------+-------------+
+    
+Note: MapType can not be used in collect_set(), this yield the following ERROR:
+
+      cannot resolve 'collect_set(map(`key`, `value`))' due to data type mismatch: collect_set() cannot have map type data
+
+    To use map directly, try collext_list and using aggregate + map_concat to merge maps
+
+    df_a.join( 
+        broadcast(df_b), 
+        expr("array_contains(array_of_str, key)"), 
+        "left" 
+     ).groupby('str1') \ 
+      .agg( 
+         first('array_of_str').alias('array_of_str'), 
+         expr("aggregate(collect_list(map(key, value)),map(),(x,y)->map_concat(x,y))").alias('result_mapping') 
+     ).selectExpr(
+        'str1', 
+        'array_of_str', 
+        'filter(transform(array_of_str, x -> result_mapping[x]), y -> y is not null) as joined_result'
+     ).show()                   
+
+
+
+
