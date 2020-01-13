@@ -1,0 +1,77 @@
+https://stackoverflow.com/questions/59709531/how-to-calculate-days-between-when-last-condition-was-met
+
+This is one type of questions which can be simplified by adding some assitant Rows (we flag them and then remove them later)
+
+    from pyspark.sql import Window
+    from pyspark.sql.functions import lit, lag, sum as fsum, first, datediff
+
+    df = spark.createDataFrame([
+      ("2020-01-12","d1",0), ("2020-01-12","d2",0), ("2020-01-13","d3",0),
+      ("2020-01-14","d4",1), ("2020-01-15","d5",0), ("2020-01-15","d6",0),
+      ("2020-01-16","d7",0), ("2020-01-17","d8",0), ("2020-01-18","d9",1),
+      ("2020-01-19","d10",0), ("2020-01-20","d11",0)
+    ], ['date', 'device', 'condition'])
+
+Create a new dataframe df1 which replicate all Rows with condition == 1 but set their condition = 0
+and flag = 1, union with the original dataframe (setting flag = 0):
+
+    df1 = df.withColumn('flag', lit(0)).union( 
+        df.where('condition = 1').withColumn('condition', lit(0)).withColumn('flag', lit(1))
+    )
+
+Set up two Window Specs, use `w1` to help create a sub-group label `g` to group all consecutive rows 
+after condition switched from 1 to 0. add `flag` into orderBy() so that the newly added Rows (with the same
+row values except that condition = 0) sit right behind its corresponding rows with condition = 1 (this set to 
+the next group-label).
+
+    w1 = Window.partitionBy(lit(0)).orderBy('date', 'flag')
+    w2 = Window.partitionBy(lit(0), 'g').orderBy('date', 'flag')
+
+**Note:** you should change `lit(0)` to some actual columns which can be used to partition your data Rows
+to avoid moving all data to a single partition.
+
+use lag and sum function over `w1` to find the sub-group label 'g' and then calculate the first_date
+in the same group use WindowSpec `w2`. this date is used to calculate the column 'life': 
+    
+    df2 = df1.withColumn('g', fsum((lag('condition').over(w1) == 1).astype('int')).over(w1)) \
+        .withColumn('first_date', first('date').over(w2)) \
+        .withColumn('life', datediff('date','first_date'))
+    df2.show()
+    +----------+------+---------+----+---+----------+----+                          
+    |      date|device|condition|flag|  g|first_date|life|
+    +----------+------+---------+----+---+----------+----+
+    |2020-01-12|    d1|        0|   0|  0|2020-01-12|   0|
+    |2020-01-12|    d2|        0|   0|  0|2020-01-12|   0|
+    |2020-01-13|    d3|        0|   0|  0|2020-01-12|   1|
+    |2020-01-14|    d4|        1|   0|  0|2020-01-12|   2|
+    |2020-01-14|    d4|        0|   1|  1|2020-01-14|   0|
+    |2020-01-15|    d5|        0|   0|  1|2020-01-14|   1|
+    |2020-01-15|    d6|        0|   0|  1|2020-01-14|   1|
+    |2020-01-16|    d7|        0|   0|  1|2020-01-14|   2|
+    |2020-01-17|    d8|        0|   0|  1|2020-01-14|   3|
+    |2020-01-18|    d9|        1|   0|  1|2020-01-14|   4|
+    |2020-01-18|    d9|        0|   1|  2|2020-01-18|   0|
+    |2020-01-19|   d10|        0|   0|  2|2020-01-18|   1|
+    |2020-01-20|   d11|        0|   0|  2|2020-01-18|   2|
+    +----------+------+---------+----+---+----------+----+
+    
+drop temporary rows and columns to get the final dataframe:
+    
+    df_new = df2.filter('flag = 0').drop('first_date', 'g', 'flag')
+    df_new.show()
+    +----------+------+---------+----+                                              
+    |      date|device|condition|life|
+    +----------+------+---------+----+
+    |2020-01-12|    d1|        0|   0|
+    |2020-01-12|    d2|        0|   0|
+    |2020-01-13|    d3|        0|   1|
+    |2020-01-14|    d4|        1|   2|
+    |2020-01-15|    d5|        0|   1|
+    |2020-01-15|    d6|        0|   1|
+    |2020-01-16|    d7|        0|   2|
+    |2020-01-17|    d8|        0|   3|
+    |2020-01-18|    d9|        1|   4|
+    |2020-01-19|   d10|        0|   1|
+    |2020-01-20|   d11|        0|   2|
+    +----------+------+---------+----+
+    
