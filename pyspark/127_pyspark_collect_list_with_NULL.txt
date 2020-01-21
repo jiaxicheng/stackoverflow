@@ -1,0 +1,119 @@
+https://stackoverflow.com/questions/59833267/spark-convert-multiple-rows-into-single-row-with-multiple-collections
+
+An example of collect_list / collect_set, using IF(cond, value, NULL) as items to collect Rows only satisfying `cond`. notice that collect_list/collect_set will skip items having NULL value:
+
+    df = spark.read.text('/home/xicheng/test/groupby-4.txt')
+
+Split the line into two column: personId (the 1st field) and an ArrayType column (the rest of the fields)
+
+    from pyspark.sql.functions import expr, split
+
+    df1 = df.withColumn('data', split('value', '[|]')) \
+        .selectExpr('data[0] as personId', 'slice(data,2,size(data)-1) as data')
+
+Use groupby + collect_list
+
+    """In case Phone and Addr are array of arrays
+    """
+    df1.groupby('personId') \
+        .agg(
+          expr("collect_list(IF(data[0] = 'PERSON', data, NULL))[0] as d1"),
+          expr("collect_list(IF(data[0] = 'PHONE', data, NULL)) as Phone"),
+          expr("collect_list(IF(data[0] = 'ADDR', data, NULL)) as Addr")
+        ).selectExpr(
+          'personId',
+          'd1[0] as type',
+          'd1[1] as firstName',
+          'd1[2] as lastName',
+          'd1[3] as year',
+          'd1[4] as month',
+          'd1[5] as day',
+          'Phone',
+          'Addr'
+        ).show(truncate=False)
+
+    """In case Phone and Addr are array of structs
+    create 3 ArrayType columns: d1, Phone and Addr based on the value of `data[0]`:
+    (1) if data[0] == `PERSON`, create an array of structs with 6 fields. take the first item of 
+        the resulting array of structs and named it as `d1`, we will convert it into 6 columns in
+        the next select command using `d1.*`
+    (2) if data[0] == 'PHONE', create an array of structs with 5 fields
+    (3) if data[0] == 'ADDR', create an array of structs with 7 fields
+    """
+    df1.groupby('personId') \
+        .agg(
+          expr("""
+            collect_list(
+              IF(data[0] = 'PERSON'
+              , (data[0] as type,
+                 data[1] as firstName,
+                 data[2] as lastName,
+                 data[3] as year,
+                 data[4] as month,
+                 data[5] as day)
+              , NULL)
+            )[0] AS d1"""),
+          expr("""
+            collect_list(
+              IF(data[0] = 'PHONE'
+              , (data[0] as phColType, 
+                 data[1] as phoneType, 
+                 data[2] as areaCode, 
+                 data[3] as phoneMiddle, 
+                 data[4] as ext)
+              , NULL)
+            ) AS Phone"""),
+          expr("""
+            collect_list(
+              IF(data[0] = 'ADDR'
+              , (data[0] as addrColType,
+                 data[1] as addrType,
+                 data[2] as addr1,
+                 data[3] as addr2,
+                 data[4] as city,
+                 data[5] as state,
+                 data[6] as zipCode)
+              , NULL)
+            ) AS Addr""")
+        ).select(
+          'personId',
+          'd1.*',
+          'Phone',
+          'Addr'
+        ).show(truncate=False)
+
+Notes:
+ (1) For Spark before 2.4, use the following method for df1:
+
+    from pyspark.sql.functions import expr, substring_index 
+
+    df1 = df.withColumn('personId', substring_index('value', '|', 1)) \
+        .selectExpr('personId', 'split(substr(value, length(personId)+2), "[|]") as data')
+
+ (2) Resulting schema:
+
+root
+ |-- personId: string (nullable = true)
+ |-- type: string (nullable = true)
+ |-- firstName: string (nullable = true)
+ |-- lastName: string (nullable = true)
+ |-- year: string (nullable = true)
+ |-- month: string (nullable = true)
+ |-- day: string (nullable = true)
+ |-- Phone: array (nullable = true)
+ |    |-- element: struct (containsNull = true)
+ |    |    |-- phColType: string (nullable = true)
+ |    |    |-- phoneType: string (nullable = true)
+ |    |    |-- areaCode: string (nullable = true)
+ |    |    |-- phoneMiddle: string (nullable = true)
+ |    |    |-- ext: string (nullable = true)
+ |-- Addr: array (nullable = true)
+ |    |-- element: struct (containsNull = true)
+ |    |    |-- addrColType: string (nullable = true)
+ |    |    |-- addrType: string (nullable = true)
+ |    |    |-- addr1: string (nullable = true)
+ |    |    |-- addr2: string (nullable = true)
+ |    |    |-- city: string (nullable = true)
+ |    |    |-- state: string (nullable = true)
+ |    |    |-- zipCode: string (nullable = true)
+
