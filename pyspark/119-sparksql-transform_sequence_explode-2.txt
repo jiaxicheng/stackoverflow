@@ -1,0 +1,35 @@
+https://stackoverflow.com/questions/60068037/how-do-i-use-flatmap-with-multiple-columns-in-dataframe-using-pyspark
+
+Use sequence to generate an array of timestamps between starttime and endtime interval by 1 hours, and then transform it
+into a named_struct with interval calculated by each item (x below) of the above sequence
+
+df.withColumn('dts', expr("""
+      transform(
+        /* create a sequence between the HOURS of starttime and endtime */
+        sequence(date_trunc("HOUR", starttime), date_trunc("HOUR", endtime), interval 1 hours),
+        /* iterate through each item `x` of sequence and convert it into a named_struct */
+        x -> named_struct(
+          /* starttime is the max between x and starttime */
+          'starttime', greatest(x, starttime), 
+          /* endtime is the min between x + 59min + 59sec and endtime */
+          'endtime', least(x + interval 59 minutes 59 seconds, endtime)
+        )
+      )
+    """)).selectExpr('Name', 'city', 'inline_outer(dts)').show()
++-----+------+-------------------+-------------------+
+|Name |city  |starttime          |endtime            |
++-----+------+-------------------+-------------------+
+|user1|London|2019-08-02 03:34:45|2019-08-02 03:52:03|
+|user2|Boston|2019-08-13 13:34:10|2019-08-13 13:59:59|
+|user2|Boston|2019-08-13 14:00:00|2019-08-13 14:59:59|
+|user2|Boston|2019-08-13 15:00:00|2019-08-13 15:02:10|
++-----+------+-------------------+-------------------+
+
+**Where:**
+
+(1) `date_trunc("HOUR", starttime)`: truncate the column starttime to HOUR
+(2) `sequence(start, end, interval 1 hours)`: create a sequence of timestamp between `start` and `end`, 
+    interval by 1 hours inclusively
+(3) `transform(arr_col, x -> names_struct(..))`: iterate through each array item x in arr_col 
+    and transform it into a named_struct
+
