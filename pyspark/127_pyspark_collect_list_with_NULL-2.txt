@@ -1,0 +1,48 @@
+https://stackoverflow.com/questions/60085374/pyspark-dataframe-aggregate-a-column-by-sliding-time-window
+
+Another example of collect_list / collect_set, using IF(cond, value, NULL) as items to collect Rows only satisfying `cond`. notice that collect_list/collect_set will skip items having NULL value:
+
+    from pyspark.sql.functions import last_day, to_date, expr, max as fmax
+    from pyspark.sql import Window
+
+    df = spark.createDataFrame([ 
+          ('dhd', '589', 'ecdu', '2020-1-5') 
+        , ('dhd', '575', 'tygp', '2020-1-5') 
+        , ('dhd', '821', 'rdsr', '2020-1-5') 
+        , ('dhd', '872', 'rgvd', '2019-12-1') 
+        , ('dhd', '619', 'bhnd', '2019-12-1') 
+        , ('dhd', '781', 'prti', '2019-12-1') 
+        ], ['client_id', 'value1', 'name1', 'a_date'])
+
+    w1 = Window.partitionBy('client_id')
+
+    # set up a_month to the end_date of the month for each `a_date`, and 
+    # set_up ref_month to the latest month of each client_id using Window-spec w1
+    df1 = df.withColumn('a_month', last_day(to_date('a_date', 'yyyy-M-d'))) \
+        .withColumn('ref_month', fmax('a_month').over(w1))
+
+    # groupby client and find collect_list of the last `i` month 
+    # using `IF(a_month >= add_months(ref_month, -i),name1,null)`
+    df1.groupby('client_id') \
+       .agg(
+         expr("collect_list(IF(a_month >= add_months(ref_month,0),name1,null)) as last_0_month"),
+         expr("collect_list(IF(a_month >= add_months(ref_month,-1),name1,null)) as last_1_month")
+       ).show(2,0)
+    +---------+------------------+------------------------------------+             
+    |client_id|last_0_month      |last_1_month                        |
+    +---------+------------------+------------------------------------+
+    |dhd      |[ecdu, tygp, rdsr]|[ecdu, tygp, rdsr, rgvd, bhnd, prti]|
+    +---------+------------------+------------------------------------+
+
+
+Use the same method, but generalize it to 0-N months using list comprehension
+
+    N = 12
+
+    df1.groupby('client_id').agg(*[ 
+        expr("collect_list(IF(a_month >= add_months(ref_month,-{0}),name1,null)) as last_{0}_month".format(i)) 
+          for i in range(N) 
+    ]).show()
+
+
+
