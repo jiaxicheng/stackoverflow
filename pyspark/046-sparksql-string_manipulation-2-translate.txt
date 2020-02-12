@@ -1,0 +1,51 @@
+https://stackoverflow.com/questions/60177244/pyspark-udf-hangs-how-to-avoid-udf
+    
+PySpark to map values read from one column: for example the original column A = '0/2' and
+map B = 'AGF', we want to convert A into 'A/F'
+
+The dataframe is as follows:
+
+    df = spark.createDataFrame([('0/1/2/3','AG'),('0/1/3/2','RTFS')],['A','B'])
+    
+Method-1: use Array operations (need Spark 2.4+):
+    
+    df.withColumn('mapB', expr("filter(split(B, ''), x -> x != '')")) \
+      .selectExpr('*', "array_join(transform(split(A,'/'), x -> ifnull(mapB[int(x)],x)), '/') as C") \
+      .show()
+    +-------+----+------------+-------+
+    |      A|   B|        mapB|      C|
+    +-------+----+------------+-------+
+    |0/1/2/3|  AG|      [A, G]|A/G/2/3|
+    |0/1/3/2|RTFS|[R, T, F, S]|R/T/S/F|
+    +-------+----+------------+-------+
+
+
+Method-2: use translate, only works if length of B is less than 10:
+    
+    # A: need Spark 2.4+
+    df.selectExpr('*', "translate(A, concat_ws('',sequence(0,length(B)-1)), B) as C").show()                              
+    +-------+----+-------+
+    |      A|   B|      C|
+    +-------+----+-------+
+    |0/1/2/3|  AG|A/G/2/3|
+    |0/1/3/2|RTFS|R/T/S/F|
+    +-------+----+-------+
+    
+    # before Spark 2.4, use the following:
+    df.selectExpr('*', "translate(A, substr('0123456789',1,length(B)), B) as C").show()
+    +-------+----+-------+
+    |      A|   B|      C|
+    +-------+----+-------+
+    |0/1/2/3|  AG|A/G/2/3|
+    |0/1/3/2|RTFS|R/T/S/F|
+    +-------+----+-------+
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
