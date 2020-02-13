@@ -1,0 +1,41 @@
+https://stackoverflow.com/questions/60164155/how-to-convert-string-column-to-udt-vector-with-float-values-pyspark
+
+Convert string column to array of floats or Vector using from_json():
+
+    from pyspark.sql.functions import from_json, expr
+
+    df = spark.createDataFrame([
+        ('[-0.65467646, 0.578577578, 0.577757775]',),
+        ('[-0.65467647, 0.578577579, 0.577757773]',),
+        ('[-0.65467648, 0.578577570, 0.577757771]',)
+    ], ['features'])
+
+To convert to array of floats:
+
+    df.withColumn('features', from_json('f1', 'array<float>'))
+    # DataFrame[features: array<float>]
+
+To convert to Vector:
+
+    from pyspark.sql.types import ArrayType
+    from pyspark.ml.linalg import VectorUDT
+
+    schema = ArrayType(VectorUDT())
+
+    # use the schema of DenseVector: `{"type":1, "values":...}`
+    df.withColumn('f1', expr("""'[{"type":1,"values":'||features||'}]'""")) \
+        .withColumn('features', from_json('f1', schema)[0])
+    
+    # DataFrame[features: vector, f1: string]
+
+**Where:** 
+(1) we create an JSON string of `[{"type":1, "values":<features>}]` by concatenating `[{"type":1,"values":`
+  , features and `}]` which will create an array of VectorUDT.
+    type=1 pointed to DenseVector, type=0 to SparseVector
+
+  ref: https://stackoverflow.com/questions/42138482/how-do-i-convert-an-array-i-e-list-column-to-vector
+
+(2) Notice that the schema used in `from_json` function must be one of the complex data type: array, struct or map.
+   that's why we use ArrayType to wrap up the VectorUDT()
+
+
