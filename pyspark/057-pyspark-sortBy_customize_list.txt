@@ -1,0 +1,33 @@
+https://stackoverflow.com/questions/60536565/custom-sorting-in-pyspark-dataframes
+
+Just create a Map and then sort by that Map values:
+Use Map to customize the sorting order
+
+    from itertools import chain
+    from pyspark.sql.functions import create_map, lit
+
+    speed_category = ["Super Fast", "Fast", "Medium", "Slow"]
+
+    df = spark.createDataFrame([
+        (i,e,) for i,e in enumerate(["Fast", "Slow", "Fast", "Super Fast", "Medium", "Fast"])
+    ], ["id", "Speed"])
+
+    map1 = create_map([lit(i) for i in chain.from_iterable(map(reversed,enumerate(speed_category)))])
+    #Column<b'map(Super Fast, 0, Fast, 1, Medium, 2, Slow, 3)'>
+
+    df.orderBy(map1[df.Speed]).show()
+    +---+----------+
+    | id|     Speed|
+    +---+----------+
+    |  3|Super Fast|
+    |  0|      Fast|
+    |  5|      Fast|
+    |  2|      Fast|
+    |  4|    Medium|
+    |  1|      Slow|
+    +---+----------+
+
+
+
+
+
