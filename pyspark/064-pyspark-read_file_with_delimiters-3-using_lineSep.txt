@@ -1,0 +1,38 @@
+https://stackoverflow.com/questions/61092444/dataframe-from-a-str-format-data
+
+Read input file in Multi-Line mode (only for Spark 2.4+) by using spark.read.text with lineSep
+
+In the below example, we use '\nx\n' to read the text file into Rows with one column named `value`, each row contains multiple lines with related data:
+
+    from pyspark.sql.functions import lit, col, concat
+
+    df = spark.read.text('/home/xicheng/test/sep-1.txt', lineSep='\nx\n')
+
+Remove the redundant x\n from the first entry(or `\nx` from the last entry if exists) and then use Spark SQL function str_to_map() to convert the value column from StringType into MapType:
+
+    df1 = df.selectExpr(r"str_to_map(regexp_replace(value, '^x\n|\nx$', ''), '\n',': ') as value")
+    #+------------------------------------+
+    #|value                               |
+    #+------------------------------------+
+    #|[a -> krb]                          |
+    #|[c -> HK, a -> HP, d -> T]          |
+    #|[c -> CN, a -> MSS, d -> H-MSS,  ->]|
+    #+------------------------------------+
+
+Find all distinct non-empty keys from the MapType column, then create the corresponding columns accordingly:
+
+    keys = [ x.key for x in df1.selectExpr('explode(map_keys(value)) as key').distinct().collect() if x.key ]
+    # ['d', 'c', 'a']
+
+    df1.select(
+        lit('x').alias('col1')
+      , *[ concat(lit(keys[i]+':'), col('value').getItem(keys[i])).alias('col{}'.format(i+2))  for i in range(len(keys)) ] 
+    ).show()
+    +----+-------+----+-----+
+    |col1|   col2|col3| col4|
+    +----+-------+----+-----+
+    |   x|   null|null|a:krb|
+    |   x|    d:T|c:HK| a:HP|
+    |   x|d:H-MSS|c:CN|a:MSS|
+    +----+-------+----+-----+
+
