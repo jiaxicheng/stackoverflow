@@ -1,0 +1,29 @@
+https://stackoverflow.com/questions/61137795/how-to-maintain-all-the-keys-having-null-values-of-a-dataframe-while-writing-it
+    
+PySpark write to JSON and keep entries with null values:
+    
+    from pyspark.sql import Row
+    from json import dumps
+    from datetime import datetime, date
+    from pyspark.sql.functions import col
+ 
+    df = spark.read.json('/home/xicheng/test/json-26.txt',multiLine=True)
+
+    # set up schema to convert t_date to timestamp and 
+    schema = "struct<accept_language:string,app_id:string,app_name:string,client_ip_address:string" \
+           + ",event_id:string,event_timestamp:string,offering_id:string,server_ip_address:string," \
+           + "server_timestamp:bigint,t_date:timestamp,topic_name:string,version:string>"
+
+    df = df.withColumn("event_header", col("event_header").astype(schema))
+
+    # issue using json.dumps convert datetime.datetime/datetime.date to JSON 
+    # refer to link: https://code-maven.com/serialize-datetime-object-as-json-in-python
+    mycon = lambda x: str(x) if isinstance(x, (datetime,date)) else None
+    
+    df1 = df.rdd.mapPartitions(lambda it: (Row(value=dumps(e.asDict(recursive=True), default=mycon)) for e in it)).toDF()
+    df1.coalesce(1).write.mode("append").text("/home/xicheng/test/json-26")
+    
+Notes: json.dumps have issues dumping datetime.datetime and datetime.date to JSON, need some preprocessing
+     to convert them to str, see `default` argument in the json.dumps method.
+
+ 
