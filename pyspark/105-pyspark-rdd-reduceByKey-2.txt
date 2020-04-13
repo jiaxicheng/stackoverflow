@@ -1,0 +1,65 @@
+https://stackoverflow.com/questions/60853794/pyspark-rdd-taking-the-max-frequency-with-the-least-age
+
+convert the logic from the following SQL code into RDD equivalent:
+
+SQL code: 
+
+    SELECT code, count(*) as code_frequency
+    FROM (SELECT id, code, age
+    FROM (SELECT id, code, MIN(age) AS age, COUNT(*) as cnt,
+             ROW_NUMBER() OVER (PARTITION BY id ORDER BY COUNT(*) DESC, MIN(age)) as seqnum
+          FROM tbl
+          GROUP BY id, code
+         ) t
+    WHERE seqnum = 1) a
+    GROUP BY code
+    ORDER by code_frequency DESC
+    LIMIT 5;
+
+RDD code:
+
+    rdd = sc.parallelize([{'age': 4.3218651186303, 'code': '"388.400000"', 'id': '"000PZ7S2G"'},
+     {'age': 4.34924421126357, 'code': '"388.400000"', 'id': '"000PZ7S2G"'},
+     {'age': 4.3218651186303, 'code': '"389.900000"', 'id': '"000PZ7S2G"'},
+     {'age': 4.34924421126357, 'code': '"389.900000"', 'id': '"000PZ7S2G"'},
+     {'age': 13.3667102491139, 'code': '"794.310000"', 'id': '"000PZ7S2G"'},
+     {'age': 5.99897016368982, 'code': '"995.300000"', 'id': '"000PZ7S2G"'},
+     {'age': 6.02634923989903, 'code': '"995.300000"', 'id': '"000PZ7S2G"'},
+     {'age': 4.3218651186303, 'code': '"V72.19"', 'id': '"000PZ7S2G"'},
+     {'age': 4.34924421126357, 'code': '"V72.19"', 'id': '"000PZ7S2G"'},
+     {'age': 13.3639723398581, 'code': '"V81.2"', 'id': '"000PZ7S2G"'},
+     {'age': 13.3667102491139, 'code': '"V81.2"', 'id': '"000PZ7S2G"'}])
+
+    rdd1 = rdd.map(lambda x: ((x['id'], x['code']),(x['age'], 1))) \ 
+        .reduceByKey(lambda x,y: (min(x[0],y[0]), x[1]+y[1])) \ 
+        .map(lambda x: (x[0][0], (-x[1][1] ,x[1][0], x[0][1]))) \ 
+        .reduceByKey(lambda x,y: x if x < y else y) 
+    # [('"000PZ7S2G"', (-2, 4.3218651186303, '"388.400000"'))]
+
+**Where:**
+
+(1) use `map` to initialize the pair-RDD with key=`(x['id'], x['code'])`, value=`(x['age'], 1)`
+(2) use `reduceByKey` to calculate `min_age` and `count`
+(3) use `map` to reset the pair-RDD with key=`id` and value=`(-count, min_age, code)`
+(4) use `reduceByKey` to find the min value of tuples `(-count, min_age, code)` for the same `id`
+
+The above steps is similar to:
+
++ Step (1) + (2): groupby('id','code').agg(min('age'), count())
++ Step (3) + (4): groupby('id').agg(min(struct(negative('count'),'min_age','code')))
+
+The derived table `a` in the SQL can be found by doing 
+
+    rdd1.map(lambda x: (x[0], x[1][2], x[1][1]))
+
+but this is not necessary since the `code` can be counted directly from `rdd1` by another map function + countByKey() method and then sort the result:
+
+    sorted(rdd1.map(lambda x: (x[1][2],1)).countByKey().items(), key=lambda y: -y[1])[:5]
+    # [('"388.400000"', 1)]
+
+However, if the sum(count) across all `id`s is required, then do the following:
+
+    rdd1.map(lambda x: (x[1][2],-x[1][0])).reduceByKey(lambda x,y: x+y).collect()
+    # [('"388.400000"', 2)]
+
+
