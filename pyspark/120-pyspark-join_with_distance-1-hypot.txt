@@ -1,0 +1,47 @@
+https://stackoverflow.com/questions/60715023/pyspark-dataframe-imputing-nulls-based-on-user-defined-functions-window
+
+Target: filling the Null value with the value from Row from the same Group and having the closest Euclidean distance:
+
+    from pyspark.sql.functions import row_number, expr
+    from pyspark.sql import Window
+
+    df = spark.createDataFrame([
+          ('a', '100', '100', None) 
+        , ('a', '200', '100', '50') 
+        , ('a', '150', '500', '30') 
+        , ('b', '100', '110', '4') 
+        , ('b', '95', '95', None) 
+       ], ('Group', 'X', 'Y', 'Res')) 
+
+Split the datafeame into two: one (df1) contains all NULL Res, and the rest to another dataframe(df2)
+
+    df1 = df.filter('Res is null').selectExpr('Group', 'X as X0', 'Y as Y0')
+    df2 = df.filter('Res is not null')
+
+Create the WindowSpec using all column from df1 in PartitionBy, sort the rows
+in WinSpec using `hypot(Y-Y0, X-X0)` which is the Euclidean distance.
+(Note: if df1 contains duplicates, then create an monotonically_increasing_id() and use that `id` in PartitionBy())
+
+    w1 = Window.partitionBy('Group', 'X0', 'Y0').orderBy(expr('hypot(Y-Y0, X-X0)'))
+
+Join(left) df1 and df2, find the row_number over the above WinSpec and then filter the resuling list having `rn == 1`
+which have min Euclidean distance:
+
+    df3 = df1.join(df2, 'Group', 'left') \
+        .withColumn('rn', row_number().over(w1)) \
+        .selectExpr('Group', 'X0', 'Y0', 'Res') \
+        .filter('rn = 1')
+
+union df2 with the above dataframe:
+
+    df2.union(df3).show()    
+    +-----+---+---+---+                                                             
+    |Group|  X|  Y|Res|
+    +-----+---+---+---+
+    |    a|200|100| 50|
+    |    a|150|500| 30|
+    |    b|100|110|  4|
+    |    b| 95| 95|  4|
+    |    a|100|100| 50|
+    +-----+---+---+---+
+
