@@ -1,0 +1,73 @@
+https://stackoverflow.com/questions/61209968/pyspark-formatting-json-before-input-to-dataframe
+
+Example processing JSON files when their schema are not consistent over files. Also, only part of the contents are of concern, no need to retrieve all fields. Assume all tweets nodes are array of structs with consistent field definitions, i.e. the following schema:
+
+    schema_tweets = "array<struct<postID:string,timestamp:string,categories:array<string>,indicatorTerms:array<int>,priority:string,text:string>>"
+    
+(1) if all tweets field from different files are at the same node position, i.e. JSONPath: `$.events[*].tweets`, then just specify schema when running spark.read.json().
+    
+    # DF schema in DDL format
+    schema = "events array<struct<tweets:{}>>".format(schema_tweets)
+    
+    df = spark.read.json('/home/xicheng/test/json-27.txt',multiLine=True, schema=schema)
+    
+    df.printSchema()                                                                                                    
+    root
+     |-- events: array (nullable = true)
+     |    |-- element: struct (containsNull = true)
+     |    |    |-- tweets: array (nullable = true)
+     |    |    |    |-- element: struct (containsNull = true)
+     |    |    |    |    |-- postID: string (nullable = true)
+     |    |    |    |    |-- timestamp: string (nullable = true)
+     |    |    |    |    |-- categories: array (nullable = true)
+     |    |    |    |    |    |-- element: string (containsNull = true)
+     |    |    |    |    |-- indicatorTerms: array (nullable = true)
+     |    |    |    |    |    |-- element: integer (containsNull = true)
+     |    |    |    |    |-- priority: string (nullable = true)
+     |    |    |    |    |-- text: string (nullable = true)
+    
+    
+    df.selectExpr("inline(events)").selectExpr("inline(tweets)").show()                                                 
+    +------+---------+-----------+--------------+--------+-----+
+    |postID|timestamp| categories|indicatorTerms|priority| text|
+    +------+---------+-----------+--------------+--------+-----+
+    |   111| 01/01/01| [Category]|           [3]|     Low| text|
+    |   112| 01/02/01|[Category1]|        [1, 2]|  Medium|text2|
+    +------+---------+-----------+--------------+--------+-----+
+    
+(2) if tweets fields can be in different nodes, then use spark.read.text with wholetext=True, and specify all valid JSONPaths for tweets nodes in an array:
+    
+    df = spark.read.text('/home/xicheng/test/json-27.txt', wholetext=True)
+    
+    # specify all valid paths
+    paths = [ '$.events[*].tweets', '$.tweets' ]
+    
+iUse the following SQL expression to test/run all paths to retrieve the tweets data
+
+    sql_expr = """inline(from_json(coalesce({}),"{}"))""".format(
+      ",".join("get_json_object(value,'{}')".format(p) for p in paths),
+      schema_tweets
+    )
+    # inline(
+    #   from_json(
+    #     coalesce(get_json_object(value,'$.events[*].tweets'), get_json_object(value,'$.tweets')),
+    #     schema_tweets)
+    # )
+
+    df.selectExpr(sql_expr).show()
+
+Where:
+ 
+(1) use `get_json_object()` to find the node of tweets fields, if JSONPath does not work, try the next JSONPath
+(2) use `from_json()` to retrieve JSON fields into an array of structs
+(3) use `inline()` function to explode the above array of structs
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
