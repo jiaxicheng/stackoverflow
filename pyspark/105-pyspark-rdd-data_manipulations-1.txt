@@ -1,0 +1,61 @@
+RDD related data manipulation:
+
+Example-1: check and count if consecutive words in a text file start with the same character.
+  REF: https://stackoverflow.com/questions/60640211/
+
+    lines = sc.parallelize([
+      "Horrid Henry's hound hunts in the massive Murree mountains. While silly stupid Samuel's dark dreadful dragon likes to hunt in skies.", 
+      "Horrid Henry's hound and Samuel's dreadful dragon Dany are fast friends and like to hunt and play together. They call themselves fantastic fanciful foursome."
+    ])
+
+    lines.flatMap(lambda line: [ 
+        (e[i][0],1) for e in [ line.upper().split() ]
+          for i in range(0,len(e)-2) if e[i][0] == e[i+1][0] == e[i+2][0] 
+     ]).reduceByKey(lambda x,y: x+y).collect()
+    #[('H', 3), ('M', 1), ('S', 1), ('D', 2), ('F', 1)]
+
+ Notes:
+  (1) use `[ line.upper().split() ]` to convert the line into a list of lists with a single item 
+      containing all uppercased words from the current line
+  (2) iterate through the item `e` from the above list by `range(0,len(e)-2)` in order to generate 
+      all tri-grams of the line
+  (3) yield an entry `(e[i][0],1)` only if all three words start with the same character by using 
+      `e[i][0] == e[i+1][0] == e[i+2][0]`
+  (4) use reduceByKey to do the counting
+
+
+
+Example-2: find all mainID which do not shown in the list of secondaryIDs
+
+  REF: https://stackoverflow.com/questions/60609125 [DELETED]
+
+sample text:
+---
+1: 2 3 4 13
+5: 6 7 8 1
+9: 10 11 12
+13: 14 15 16
+
+    lines = sc.parallelize(['1: 2 3 4 13', '5: 6 7 8 1', '9: 10 11 12', '13: 14 15 16'])
+
+    # rdd1: (mainID, secondaryID)
+    # rdd2: (secondaryID, mainID)
+    rdd1 = lines.flatMap(lambda x: [ (int(e1[0]), int(e2)) for e1 in [x.split(':')] for e2 in e1[1].split() ] )
+
+    rdd1.collect()                                                                                                     
+    #Out[197]: 
+    #[(1, 2), (1, 3), (1, 4), (1, 13),
+    # (5, 6), (5, 7), (5, 8), (5, 1),
+    # (9, 10), (9, 11), (9, 12),
+    # (13, 14), (13, 15), (13, 16)]
+
+    rdd2 = rdd1.map(lambda x:(x[1],x[0]))
+
+    # use leftOuterJoin and find the right value x[1][1] is None
+    rdd1.leftOuterJoin(rdd2)\
+        .filter(lambda x: x[1][1] is None) \
+        .keys() \
+        .distinct() \
+        .collect()                                                                                                         
+    # [5, 9]
+
