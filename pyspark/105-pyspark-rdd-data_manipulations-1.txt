@@ -26,7 +26,6 @@ Example-1: check and count if consecutive words in a text file start with the sa
 
 
 Example-2: find all mainID which do not shown in the list of secondaryIDs
-
   REF: https://stackoverflow.com/questions/60609125 [DELETED]
 
 sample text:
@@ -58,4 +57,24 @@ sample text:
         .distinct() \
         .collect()                                                                                                         
     # [5, 9]
+
+
+Example-3: Use flatMap to create pair-RDD:
+  REF: https://stackoverflow.com/questions/61289164
+
+  use set to find unique words split from a sentencem run flatMap to create pari-RDD, then run reduceByKey() 
+  to count the list of ids exist for each word:
+
+    collection = sc.parallelize([(1, "winter is coming"), (2, "ours is the fury"), (3, "the old the true the brave")])
+
+    collection.flatMap(lambda x: [ (e,[x[0]]) for e in set(x[1].split()) ]).reduceByKey(lambda x,y: x+y).collect()
+    #[('coming', [1]),
+    # ('winter', [1]),
+    # ('is', [1, 2]),
+    # ('fury', [2]),
+    # ('the', [2, 3]),
+    # ('ours', [2]),
+    # ('old', [3]),
+    # ('brave', [3]),
+    # ('true', [3])]
 
