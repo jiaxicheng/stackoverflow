@@ -78,3 +78,23 @@ Example-3: Use flatMap to create pair-RDD:
     # ('brave', [3]),
     # ('true', [3])]
 
+
+
+Example-4: zip_longest or map when reduceByKey:
+  REF: https://stackoverflow.com/questions/61286521
+
+  use `zip_longest()` and `fillvalue=0` to sum item values of lists by indices:
+
+    from itertools import zip_longest
+
+    rdd = sc.parallelize([ (1,[1,2,3]), (1,[2,3,4]), (1,[1,1])])
+    rdd.reduceByKey(lambda x,y: [ sum(z) for z in zip_longest(x,y,fillvalue=0)] ).collect()
+    # [(1, [4, 6, 7])]
+
+
+
+
+
+
+
+
