@@ -1,0 +1,54 @@
+https://stackoverflow.com/questions/61343625/pandas-iterations-to-pyspark-function
+
+Create an array column and then explode it is often useful to generate extra Rows:
+    
+Target: to enforce continuity in terms of last destination (in to column) being the exact next starting point (in from column) per id:
+
+Method: find the next_from using `lead()` Window function, create an array of structs based on following condition:
+
+    IF(to = next_from OR ft_next is NULL, array((from, to)), array((from, to), (to as from, next_from as to)))
+    
+Code:
+
+    from pyspark.sql import functions as F, Window 
+    
+    w1 = Window.partitionBy('id').orderBy('dt') 
+    
+    df.withColumn('next_from', F.lead('from').over(w1)).show()
+    +---+---+----+---+---------+                                                    
+    | dt| id|from| to|next_from|
+    +---+---+----+---+---------+
+    |  1|  1|   A|  B|        C|
+    |  2|  1|   C|  A|     null|
+    |  1|  2|   D|  D|        F|
+    |  2|  2|   F|  G|        F|
+    |  3|  2|   F|  F|     null|
+    +---+---+----+---+---------+
+
+    df.withColumn('next_from', F.lead('from').over(w1)) \
+        .selectExpr(
+            "dt",
+            "id", 
+            """
+              inline_outer(
+                IF(to = next_from OR next_from is NULL
+                , array((from, to))
+                , array((from, to), (to as from, next_from as to))
+                )
+              )
+            """
+        ).orderBy('id','dt').show()
+    +---+---+----+---+                                                              
+    | dt| id|from| to|
+    +---+---+----+---+
+    |  1|  1|   A|  B|
+    |  1|  1|   B|  C|
+    |  2|  1|   C|  A|
+    |  1|  2|   D|  D|
+    |  1|  2|   D|  F|
+    |  2|  2|   F|  G|
+    |  2|  2|   G|  F|
+    |  3|  2|   F|  F|
+    +---+---+----+---+
+
+    
