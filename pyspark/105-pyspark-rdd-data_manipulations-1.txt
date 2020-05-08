@@ -92,9 +92,35 @@ Example-4: zip_longest or map when reduceByKey:
     # [(1, [4, 6, 7])]
 
 
+Example-5: use keyBy + reduceByKey + values to find element with max(count) for each age:
+  REF: https://stackoverflow.com/questions/61658487/how-do-i-partition-rank-and-sort-data-using-a-pyspark-rdd
 
+  given rdd1 = (age, code, count), to find the max count for each age using RDD method:
 
+    rdd1 = sc.parallelize([(4, '"388.400000"', 5), (4, '"389.900000"', 2), (13, '"794.310000"', 1), 
+      (5, '"995.300000"', 1), (6, '"995.300000"', 1), (4, '"V72.19"', 2), (13, '"V81.2"', 2)]) 
 
+    rdd1.keyBy(lambda x: x[0]).reduceByKey(lambda x,y: x if x[2] >= y[2] else y).values().collect()
+    #[(4, '"388.400000"', 5), (13, '"V81.2"', 2), (5, '"995.300000"', 1), (6, '"995.300000"', 1)]
 
+  Notes:
+  (1) use keyBy(): to set pair-RDD of (age, (age, code, count))
+  (2) reduceByKey(): to find element with max(count) for each age
+  (3) use values() to take values only
+
+  The above takes only one item for each key when there are ties at max value (similiar to row_number). to achieve 
+  the same result as rank(), see the folloiwng two approaches on saving multiple codes and then take flatMap:
+
+  Method-1: use string concatenate and then split
+    rdd1.keyBy(lambda x: x[0]) \
+        .reduceByKey(lambda x,y: x if x[2] > y[2] else y if x[2] < y[2] else (x[0], x[1]+','+y[1],x[2])) \
+        .flatMap(lambda x:[ (x[0],e,x[1][2]) for e in x[1][1].split(",")]) \
+        .collect() 
+
+  Method-2: use list operation
+    rdd1.map(lambda x: (x[0],([x[1]],x[2]))) \
+        .reduceByKey(lambda x,y: x if x[1] > y[1] else y if x[1] < y[1] else (x[0]+y[0],x[1])) \
+        .flatMap(lambda x:[ (x[0],e,x[1][1]) for e in x[1][0]]) \
+        .collect()
 
 
