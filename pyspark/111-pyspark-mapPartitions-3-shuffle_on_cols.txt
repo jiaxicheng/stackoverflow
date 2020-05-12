@@ -1,0 +1,28 @@
+
+https://stackoverflow.com/questions/61724208/randomize-pyspark-column-values#61724208
+
+from pyspark.sql import Row, functions as F
+import random
+
+def random_col(it):
+  c1, c2 = [], []
+  for row in it:
+    c1.append(row.InvoiceNo)
+    c2.append({ k:v for k,v in row.asDict().items() if k != 'InvoiceNo'})
+  random.shuffle(c1)
+  return Row([ {"InvoiceNo":d1, **d2} for d1,d2 in zip(c1, c2)])
+
+# shuffle on rows and then shuffle on `InvoceNo` column only on each partition
+df.repartition(2,F.rand()).rdd.mapPartitions(random_col).toDF().show()
++-----------+---------+---------+
+|Description|InvoiceNo|StockCode|
++-----------+---------+---------+
+|         t1|       51|        1|
+|         t3|       53|        3|
+|         t4|       55|        4|
+|         t5|       54|        5|
+|         t6|       56|        6|
+|         t2|       52|        2|
+|         t7|       57|        7|
++-----------+---------+---------+
+
