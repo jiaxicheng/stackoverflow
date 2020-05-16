@@ -1,0 +1,43 @@
+https://stackoverflow.com/questions/61823544/pyspark-mapping-multiple-columns/61829008#61829008
+
+create a Map from the dataframe `reference_df` with:
+
+    map_key = concat_ws('\0', PrimaryLookupAttributeName, PrimaryLookupAttributeValue)
+    map_value = OutputItemNameByValue
+
+and then apply it to another dataframe `df1` with the key: 
+
+    concat_ws('\0', <col_name>, <col_value>) 
+    
+where `col` is from a List `primaryLookupAttributeName_List`:
+    
+    from pyspark.sql.functions import collect_set, array, concat_ws, lit, col, create_map
+   
+    reference_df = spark.read.csv("/home/xicheng/test/join-8.txt", header=True)
+    df1 = spark.read.csv("/home/xicheng/test/join-8-1.txt", header=True)
+
+    primaryLookupAttributeName_List = ['LeaseType', 'LeaseRecoveryType', 'LeaseStatus']
+    
+    d = reference_df.agg(collect_set(array(concat_ws('\0','PrimaryLookupAttributeName','PrimaryLookupAttributeValue'), 'OutputItemNameByValue')).alias('m')).first().m
+    #[['LeaseStatus\x00Abandoned', 'Active'],
+    # ['LeaseRecoveryType\x00Gross-modified', 'Modified Gross'],
+    # ['LeaseStatus\x00Archive', 'Expired'],
+    # ['LeaseStatus\x00Terminated', 'Terminated'],
+    # ['LeaseRecoveryType\x00Gross w/base year', 'Modified Gross'],
+    # ['LeaseStatus\x00Draft', 'Pending'],
+    # ['LeaseRecoveryType\x00Gross', 'Gross']]
+    
+    # create mapping based on the above list of lists
+    mappings = create_map([lit(j) for i in d for j in i ])
+
+    df1.select(
+      "*", 
+      *[ mappings[concat_ws('\0', lit(c), col(c))].alias("Matched[{}]OutputItemNameByValue".format(c)) for c in primaryLookupAttributeName_List ]
+    ).show()
+    +----------------+...+---------------------------------------+-----------------------------------------------+-----------------------------------------+
+    |SourceSystemName|...|Matched[LeaseType]OutputItemNameByValue|Matched[LeaseRecoveryType]OutputItemNameByValue|Matched[LeaseStatus]OutputItemNameByValue|
+    +----------------+...+---------------------------------------+-----------------------------------------------+-----------------------------------------+
+    |          ABC123|...|                                   null|                                          Gross|                               Terminated|
+    |          ABC123|...|                                   null|                                 Modified Gross|                                  Expired|
+    |          ABC123|...|                                   null|                                 Modified Gross|                                  Pending|
+    +----------------+...+---------------------------------------+-----------------------------------------------+-----------------------------------------+
