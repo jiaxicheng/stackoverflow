@@ -1,0 +1,81 @@
+https://stackoverflow.com/questions/61896140/pyspark-can-i-pivot-a-running-window-content-on-the-current-row-with-window-ro  
+
+A toy example only to examine methods:
+---
+(1) list comprehension to set columns from a list of lists using `sum(, [])`
+
+    *sum(list of lists, []) 
+
+    the same method can be applied to create MapeType columns:
+      
+      sum(map(list,df.dtypes),[])
+
+      d = {'A':'A1', 'B':'B1', 'C':'C1'}
+      x = F.create_map(*[F.lit(i) for i in sum(map(list,d.items()),[])])
+      #Column<b'map(A, A1, B, B1, C, C1)'>
+
+
+(2) transform() function to iterate through ArrayType items:
+
+
+Method-1: use Window lag function (not recommended):
+    
+    from pyspark.sql import Window, functions as F
+    
+    w1 = Window.partitionBy().orderBy('time')
+    
+    df.select("*", *sum([ 
+      [ F.lag('data',i+1).over(w1).alias(f'time_{i+1}'), F.lag('time',i+1).over(w1).alias(f'data_{i}') ] for i in range(3) 
+      ],[])
+    ).show()
+    +----+----+------+------+------+------+------+------+
+    |time|data|time_1|data_0|time_2|data_1|time_3|data_2|
+    +----+----+------+------+------+------+------+------+
+    |0023|   g|  null|  null|  null|  null|  null|  null|
+    |0025|   h|     g|  0023|  null|  null|  null|  null|
+    |0026|   x|     h|  0025|     g|  0023|  null|  null|
+    |0031|   y|     x|  0026|     h|  0025|     g|  0023|
+    |0034|   z|     y|  0031|     x|  0026|     h|  0025|
+    +----+----+------+------+------+------+------+------+
+    
+    
+Method-2: use transform (Spark 2.4+)
+  Note: only work when data can be loaded onto the same partition
+
+You can use df.agg + collect_list to create an array column and then use SparkSQL builtin function `transform` to play around with the array index. notice this method will move all data to the same partition and thus won't work with huge data.
+
+First create a function to dynamically generate SQL expression using transform + named_struct + inline:
+
+    sql_expr = lambda x: "inline(transform(tmp, (x,i) -> named_struct({})))".format(",".join(
+        "'time_{0}', tmp[i-{0}].time, 'data_{0}', tmp[i-{0}].data".format(i)
+            for i in range(x)
+    ))
+
+    sql_expr(3)                                                                                                         
+    #"inline(transform(tmp, (x,i) -> named_struct('time_0', tmp[i-0].time, 'data_0', tmp[i-0].data,'time_1', tmp[i-1].time, 'data_1', tmp[i-1].data,'time_2', tmp[i-2].time, 'data_2', tmp[i-2].data)))"
+
+Then do the following:
+
+    df.agg(F.expr("array_sort(collect_list(struct(time,data))) as tmp")).selectExpr(sql_expr(3)).show()                 
+    +------+------+------+------+------+------+
+    |time_0|data_0|time_1|data_1|time_2|data_2|
+    +------+------+------+------+------+------+
+    |    23|     g|  null|  null|  null|  null|
+    |    25|     h|    23|     g|  null|  null|
+    |    26|     x|    25|     h|    23|     g|
+    |    31|     y|    26|     x|    25|     h|
+    |    34|     z|    31|     y|    26|     x|
+    +------+------+------+------+------+------+
+
+    df.agg(F.expr("array_sort(collect_list(struct(time,data))) as tmp")).selectExpr(sql_expr(4)).show()
+    +------+------+------+------+------+------+------+------+
+    |time_0|data_0|time_1|data_1|time_2|data_2|time_3|data_3|
+    +------+------+------+------+------+------+------+------+
+    |  0023|     g|  null|  null|  null|  null|  null|  null|
+    |  0025|     h|  0023|     g|  null|  null|  null|  null|
+    |  0026|     x|  0025|     h|  0023|     g|  null|  null|
+    |  0031|     y|  0026|     x|  0025|     h|  0023|     g|
+    |  0034|     z|  0031|     y|  0026|     x|  0025|     h|
+    +------+------+------+------+------+------+------+------+
+    
+    
