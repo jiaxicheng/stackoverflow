@@ -70,3 +70,48 @@ Example-2: vertices can from different column/sources and are not related
     +---+--------------------------+--------------------------------------------------------+
 
 
+Example-3: Use GraphFrame.connectedComponents to find the root_id(parent_id is NULL) of any specific `id`s:
+  REF: https://stackoverflow.com/questions/61925975/spark-sql-best-way-to-programmatically-loop-over-a-table
+    
+    df = spark.createDataFrame([(1,None),(2,1),(3,1),(4,None),(5,4),(6,None),(7,6),(8,3)], ['Node_id','Parent_id'])
+    
+    from graphframes import GraphFrame 
+    
+    spark.sparkContext.setCheckpointDir("/tmp/111")
+    # below used when we use the default algorithm="graphframes" with g.connectedComponents()
+    #spark.conf.set("spark.sql.shuffle.partitions", 10)
+    
+    v = df.toDF('id', 'parent_id')
+    e = df.selectExpr('Node_id as src', 'Parent_id as dst').filter('Parent_id is not null')
+    g = GraphFrame(v,e)
+    
+    # algorithm='graphx' is faster than the default `graphframes` 
+    result = g.connectedComponents(algorithm='graphx')
+    result.orderBy('id').show()                                                                                         
+    +---+---------+---------+                                                       
+    | id|parent_id|component|
+    +---+---------+---------+
+    |  1|     null|        1|
+    |  2|        1|        1|
+    |  3|        1|        1|
+    |  4|     null|        4|
+    |  5|        4|        4|
+    |  6|     null|        6|
+    |  7|        6|        6|
+    |  8|        3|        1|
+    +---+---------+---------+
+
+    result.join(
+        result.selectExpr('component', 'id as root_id').filter('parent_id is null'), 
+        'component'
+    ).filter('id in (7,8)') \
+    .select('id', 'root_id') \
+    .show() 
+    +---+-------+                                                                   
+    | id|root_id|
+    +---+-------+
+    |  7|      6|
+    |  8|      1|
+    +---+-------+
+
+
