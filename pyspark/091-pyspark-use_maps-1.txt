@@ -20,24 +20,35 @@ where `col` is from a List `primaryLookupAttributeName_List`:
     
     d = reference_df.agg(collect_set(array(concat_ws('\0','PrimaryLookupAttributeName','PrimaryLookupAttributeValue'), 'OutputItemNameByValue')).alias('m')).first().m
     #[['LeaseStatus\x00Abandoned', 'Active'],
+    # ['LeaseStatus\x00DEFAULT', 'Pending'],
     # ['LeaseRecoveryType\x00Gross-modified', 'Modified Gross'],
     # ['LeaseStatus\x00Archive', 'Expired'],
     # ['LeaseStatus\x00Terminated', 'Terminated'],
     # ['LeaseRecoveryType\x00Gross w/base year', 'Modified Gross'],
-    # ['LeaseStatus\x00Draft', 'Pending'],
     # ['LeaseRecoveryType\x00Gross', 'Gross']]
     
     # create mapping based on the above list of lists
     mappings = create_map([lit(j) for i in d for j in i ])
 
-    df1.select(
-      "*", 
-      *[ mappings[concat_ws('\0', lit(c), col(c))].alias("Matched[{}]OutputItemNameByValue".format(c)) for c in primaryLookupAttributeName_List ]
+    # default_mappings:
+    mappings_default = create_map([ lit(j.split('\0')[0]) for i in d if i[0].upper().endswith('\x00DEFAULT') for j in i ])
+    #Column<b'map(LeaseStatus, Pending)'>
+
+    # a set of available PrimaryLookupAttributeName
+    available_list = set([ i[0].split('\0')[0] for i in d ])
+    # {'LeaseRecoveryType', 'LeaseStatus'}
+
+    df1.select("*", *[ 
+      coalesce(
+        mappings[concat_ws('\0', lit(c), col(c))],
+        mappings_default[c],
+        lit("Not Specified at Source" if c in available_list else "Lookup not found")
+      ).alias("Matched[{}]OutputItemNameByValue".format(c)) for c in primaryLookupAttributeName_List ]
     ).show()
     +----------------+...+---------------------------------------+-----------------------------------------------+-----------------------------------------+
     |SourceSystemName|...|Matched[LeaseType]OutputItemNameByValue|Matched[LeaseRecoveryType]OutputItemNameByValue|Matched[LeaseStatus]OutputItemNameByValue|
     +----------------+...+---------------------------------------+-----------------------------------------------+-----------------------------------------+
-    |          ABC123|...|                                   null|                                          Gross|                               Terminated|
-    |          ABC123|...|                                   null|                                 Modified Gross|                                  Expired|
-    |          ABC123|...|                                   null|                                 Modified Gross|                                  Pending|
+    |          ABC123|...|                       Lookup not found|                                          Gross|                               Terminated|
+    |          ABC123|...|                       Lookup not found|                                 Modified Gross|                                  Expired|
+    |          ABC123|...|                       Lookup not found|                                 Modified Gross|                                  Pending|
     +----------------+...+---------------------------------------+-----------------------------------------------+-----------------------------------------+
