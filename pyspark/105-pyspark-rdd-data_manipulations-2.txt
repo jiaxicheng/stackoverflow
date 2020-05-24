@@ -1,0 +1,61 @@
+Continue..
+
+RDD data manipulations:
+
+
+Example-6: dictionary as RDD elements, fix not hashable ERROR:
+  REF: https://stackoverflow.com/questions/61967644/how-to-get-distinct-dicts-with-nested-list-of-rdd-in-pyspark
+
+  If the RDD elements are dictionaries containing a single key. Below is one way to try:
+
+  Set up RDD as below:
+
+    rdd = sc.parallelize([
+        {"link0":["link1","link2"]}, {"link1":["link2","link3"]},  
+        {"link0":["link1","link2"]}, {"link3":["link4","link5"]}]) 
+
+  Task-1: find unique RDD elements:
+
+  Use flatMap to convert the dict to a tuple with the valueipart from list to tuple so that the RDD elements are hashable.
+  take distinct() and then map the RDD elements back to their original data structure.
+
+    rdd.flatMap(lambda x: [ (k,tuple(v)) for k,v in x.items() ]) \
+       .distinct() \
+       .map(lambda x: {x[0]:list(x[1])}) \
+       .collect()
+    #[{'link0': ['link1', 'link2']},
+    # {'link1': ['link2', 'link3']},
+    # {'link3': ['link4', 'link5']}]
+
+
+  Task-2: find links in values not in keys:
+
+  retrieve all unique keys into rdd1 and unique values to rdd2 and then do `rdd2.subtract(rdd1)`
+
+    rdd1 = rdd.flatMap(lambda x: x.keys()).distinct()
+    # ['link0', 'link1', 'link3']
+
+    rdd2 = rdd.flatMap(lambda x: [ v for vs in x.values() for v in vs ]).distinct()
+    # ['link1', 'link2', 'link3', 'link4', 'link5']
+
+    rdd2.subtract(rdd1).collect()
+    # ['link2', 'link5', 'link4']
+
+
+  Notes: for Task-1 to handle more complex dicts, see more than one key but values can contains list (no set, dict etc)
+   (1) dict keys must be sorted
+   (2) values will be converted to tuple if `isinstance(v,list)`
+
+    rdd = sc.parallelize([
+        {"link0":["link1","link2"],"topic":1}, 
+        {"link1":["link2","link3"],"topic":2},  
+        {"link0":["link1","link2"],"topic":1},
+        {"link3":["link4","link5"],"topic":3}
+    ])
+
+    rdd.map(lambda x: tuple((k, tuple(v) if isinstance(v,list) else v) for k,v in sorted(x.items()))) \
+       .distinct() \
+       .map(lambda x: dict( (e[0], list(e[1]) if isinstance(e[1], tuple) else e[1]) for e in x)) \
+       .collect()
+
+
