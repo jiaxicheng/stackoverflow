@@ -1,0 +1,93 @@
+
+https://stackoverflow.com/questions/61468767/calculate-row-based-on-other-rows
+
+REF: 
+  user-guide: https://graphframes.github.io/graphframes/docs/_site/user-guide.html
+  example: https://graphframes.github.io/graphframes/docs/_site/api/python/_modules/graphframes/examples/belief_propagation.html#BeliefPropagation
+  graphframe: https://graphframes.github.io/graphframes/docs/_site/api/python/graphframes.html#graphframes.GraphFrame.aggregateMessages
+
+
+df = spark.createDataFrame([ 
+    (11190, 3.0, 11190, [820694, 3278571]), 
+    (820694, 2.0, 820694, None), 
+    (3278571, 4.0, None, None), 
+    (1,3.0,1,[2,3]), 
+    (2,0.0,2,[3,4]), 
+    (3,2.0,3,None), 
+    (4,6.0,4,None) 
+    ], ['id', 'score', 'src', 'neighbors'])   
+
+calculate mean values based on neighbors:
+
+    from pyspark.sql.functions import sum as fsum, count, mean as fmean
+    from graphframes.lib import AggregateMessages as AM
+    from graphframes import GraphFrame
+
+    spark.conf.set("spark.sql.shuffle.partitions", 10)
+
+    edges = df.selectExpr('id as src', 'explode_outer(neighbors) as dst')
+    vertices = df.select('id', 'score')
+
+    g = GraphFrame(vertices, edges)
+
+    agg = g.aggregateMessages(fmean(AM.msg).alias('avg_score'), sendToSrc=AM.dst["score"], sendToDst=AM.src["score"])
+
+    df.join(agg,"id","left").selectExpr(*df.columns, "IF(neighbors is null, score, new_score) new_score") \
+      .sort('id').show()                                                                                               
+    +-------+-----+------+-----------------+------------------+
+    |     id|score|   src|        neighbors|         new_score|
+    +-------+-----+------+-----------------+------------------+
+    |      1|  3.0|     1|           [2, 3]|               1.0|
+    |      2|  0.0|     2|           [3, 4]|3.6666666666666665|
+    |      3|  2.0|     3|             null|               2.0|
+    |      4|  6.0|     4|             null|               6.0|
+    |  11190|  3.0| 11190|[820694, 3278571]|               3.0|
+    | 820694|  2.0|820694|             null|               2.0|
+    |3278571|  4.0|  null|             null|               4.0|
+    +-------+-----+------+-----------------+------------------+
+
+Notes:
+  (1) see below edges of the Graph for the first 4 vertices:
+    ---
+      1(3.0) --> 2(0.0)
+      1(3.0) --> 3(2.0)
+      2(0.0) --> 3(2.0)
+      2(0.0) --> 4(6.0)
+    ---
+    + sendToSrc:
+      + resulting dataframe['id'] contains vertices in src of edges: 1,2
+      + if it is AM['src'], then it takes scores from src: 1 -> 1(3.0) + 1(3.0), 2 -> 2(0.0) + 2(0.0)
+          agg = g.aggregateMessages(count(AM.msg).alias('new_score'), sendToSrc=AM.src["score"])
+          +-----+---------+
+          |   id|new_score|
+          +-----+---------+
+          |    2|        2|
+          |    1|        2|
+          +-----+---------+
+          agg = g.aggregateMessages(fsum(AM.msg).alias('new_score'), sendToSrc=AM.src["score"])
+          +-----+---------+
+          |   id|new_score|
+          +-----+---------+
+          |    2|      0.0|
+          |    1|      6.0|
+          +-----+---------+
+
+      + if it is AM['dst'], then it takes scores from dst: 1 -> 2(0.0) + 3(2.0), 2 -> 3(2.0) + 4(6.0)
+          agg = g.aggregateMessages(fsum(AM.msg).alias('new_score'), sendToSrc=AM.dst["score"])
+          +-----+---------+
+          |   id|new_score|
+          +-----+---------+
+          |    2|      8.0|
+          |    1|      2.0|
+          +-----+---------+
+
+    + sendToDst:
+      + resulting dataframe['id'] contains vertices in dst of edges: 2,3,4
+    + AM.src['col']
+      + `col` must exist in g.edges, can also be expression
+    + AM.dst['col'] 
+      + `col` must exist in g.edges
+
+Link: 
+
+Pregel: https://dl.acm.org/doi/10.1145/1807167.1807184
