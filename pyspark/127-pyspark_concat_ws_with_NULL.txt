@@ -1,0 +1,37 @@
+https://stackoverflow.com/questions/62533896/how-to-find-columns-collection-with-not-null-values-in-pyspark
+
+Use concat_ws() to get a list of values except NULL:
+
+    df = spark.createDataFrame([
+        (None,None,None),(1,None,None),(None,1,None),
+        (None,None,1),(1,1,None),(1,1,1),
+        (1,None,None),(None,1,1)
+    ],["column_1", "column_2", "column_3"])
+
+    from pyspark.sql import functions as F
+
+    df.withColumn('arr', F.concat_ws(',', *[F.when(F.col(c).isNotNull(), c) for c in df.columns])) \
+      .withColumn('arr', F.expr("IF(instr(arr, ',') > 0, arr, NULL)")) \
+      .show(truncate=False)
+     +--------+--------+--------+--------------------------+
+     |column_1|column_2|column_3|arr                       |
+     +--------+--------+--------+--------------------------+
+     |null    |null    |null    |null                      |
+     |1       |null    |null    |null                      |
+     |null    |1       |null    |null                      |
+     |null    |null    |1       |null                      |
+     |1       |1       |null    |column_1,column_2         |
+     |1       |1       |1       |column_1,column_2,column_3|
+     |1       |null    |null    |null                      |
+     |null    |1       |1       |column_2,column_3         |
+     +--------+--------+--------+--------------------------+
+
+Notes:
+ (1) similar to collect_list() which can skip NULL values from a list, collect_list only used with aggregate context.
+    For general text context, use concat_ws() as a replacement.
+ (2) check if a char contains in a string, multiple choices:
+   + using string operations: instr, locate
+   + use regex: rlike
+  In this case, as long as comma exists, should be at least two columns (exception: comma contained in any column names which is rare)
+
+
