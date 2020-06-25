@@ -1,0 +1,99 @@
+Gaps & Islands:
+---
+
+
+Example-1: island and group issue: Use Window function + greatest function
+  REF: https://stackoverflow.com/questions/62513690/find-total-view-time
+
+Sample data:
+
+    df = spark.createDataFrame([
+              ('101', 'Movie1', 1, 10) 
+            , ('101', 'Movie1', 5, 15) 
+            , ('101', 'Movie1', 6, 12) 
+            , ('101', 'Movie1', 18, 23) 
+            , ('102', 'Movie1', 1, 10) 
+            , ('102', 'Movie1', 5, 15) 
+            , ('102', 'Movie1', 18, 23) 
+          ], ('user_id', 'episode_name', 'start_time', 'end_time')
+    ) 
+    
+Method-1: using Window function + greatest:
+
+    from pyspark.sql import functions as F, Window
+
+    w1 = Window.partitionBy('user_id','episode_name').orderBy('start_time').rowsBetween(Window.unboundedPreceding, -1)
+
+    df1 = df.withColumn('prev_max_end', F.max('end_time').over(w1)) \
+        .withColumn('effective_hours', F.greatest('prev_max_end','end_time') - F.greatest('prev_max_end','start_time'))
+
+    df1.show()
+    +-------+------------+----------+--------+------------+---------------+                    
+    |user_id|episode_name|start_time|end_time|prev_max_end|effective_hours|
+    +-------+------------+----------+--------+------------+---------------+                    
+    |    101|      Movie1|         1|      10|        null|              9|
+    |    101|      Movie1|         5|      15|          10|              5|
+    |    101|      Movie1|         6|      12|          15|              0|
+    |    101|      Movie1|        18|      23|          15|              5|
+    |    102|      Movie1|         1|      10|        null|              9|
+    |    102|      Movie1|         5|      15|          10|              5|
+    |    102|      Movie1|        18|      23|          15|              5|
+    +-------+------------+----------+--------+------------+---------------+                    
+
+    df1.groupby('user_id','episode_name').agg(F.sum('duration').alias('total_hours')).show()                            
+    +-------+------------+-----------+                                              
+    |user_id|episode_name|total_hours|
+    +-------+------------+-----------+
+    |    101|      Movie1|         19|
+    |    102|      Movie1|         19|
+    +-------+------------+-----------+
+
+The same method using Spark SQL:
+
+    df.createOrReplaceTempView('tb')
+
+    spark.sql("""
+
+        with t1 as (
+          SELECT *, max(end_time) OVER (
+            PARTITION BY user_id, episode_name 
+            ORDER BY start_time
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+          ) as prev_max_end 
+          FROM tb
+        )
+        SELECT user_id
+        , episode_name
+        , sum(greatest(prev_max_end,end_time) - greatest(prev_max_end,start_time)) as total_hours
+        FROM t1
+        GROUP BY user_id, episode_name
+
+    """).show()
+
+
+Method-2: using aggregate function: Spark 2.4+
+
+    from pyspark.sql import functions as F
+    
+    df.groupby('user_id','episode_name') \
+      .agg(F.sort_array(F.collect_list(F.struct('start_time','end_time'))).alias('dta')) \
+      .selectExpr("*","""
+        aggregate(
+          dta,
+          (0L as total_hours, 0L as last_end), 
+          (acc, y) -> named_struct(
+              'total_hours', acc.total_hours + greatest(y.end_time,acc.last_end) - greatest(y.start_time,acc.last_end), 
+              'last_end', greatest(y.end_time,acc.last_end)
+            ), 
+          acc -> acc.total_hours
+        ) as total_hours
+      """).show(truncate=False)
+    +-------+------------+-------------------------------------+-----------+        
+    |user_id|episode_name|dta                                  |total_hours|
+    +-------+------------+-------------------------------------+-----------+
+    |101    |Movie1      |[[1, 10], [5, 15], [6, 12], [18, 23]]|19         |
+    |102    |Movie1      |[[1, 10], [5, 15], [18, 23]]         |19         |
+    +-------+------------+-------------------------------------+-----------+
+    
+
+    
