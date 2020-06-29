@@ -1,0 +1,75 @@
+Using str_to_map:
+---
+
+
+Example-1: 
+ REF: https://stackoverflow.com/questions/62024564/split-1-long-txt-column-into-2-columns-in-pysparkdatabricks
+
+    lst = ["PL:1547497782:1547497782~ST:1548593509:1547497782",
+      "PU:1547497782:1547497782~MU:1548611698:1547497782:1~MU:1548612195:1547497782:0~ST:1548627786:1547497782",
+      "PU:1547497782:1547497782~PU:1547497782:1547497782~ST:1548637508:1547497782",
+      "PL:1548631949:0",
+      "PL:1548619200:0~PU:1548623089:1548619435~PU:1548629541:1548625887~RE:1548629542:1548625887~PU:1548632702:1548629048~ST:1548635966:1548629048",
+      "PL:1548619583:1548619584~ST:1548619610:1548619609",
+      "PL:1548619850:0~ST:1548619850:0~PL:1548619850:0~ST:1548619850:0~PL:1548619850:1548619851~ST:1548619856:1548619855"
+    ]
+
+    df = spark.createDataFrame([(e,) for e in lst],['event_list'])
+
+    # below for Spark 3.0+ only which does not allow duplicate keys
+    spark.conf.set("spark.sql.mapKeyDedupPolicy", "LAST_WIN")
+
+    df.selectExpr("str_to_map(event_list, '~', ':') as map1") \
+      .selectExpr(
+        "split(map1['PL'],':')[0] as PL", 
+        "split(map1['ST'],':')[0] as ST"
+    ).show()
+    +----------+----------+
+    |        PL|        ST|
+    +----------+----------+
+    |1547497782|1548593509|
+    |      null|1548627786|
+    |      null|1548637508|
+    |1548631949|      null|
+    |1548619200|1548635966|
+    |1548619583|1548619610|
+    |1548619850|1548619850|
+    +----------+----------+
+
+
+ Notes: in case duplicate keys exist, the above method will only retrieve the first key/value pairs, to overcome 
+   this issue, need to do the following:
+
+    df1 = df.selectExpr("str_to_map(event_list, '~', ':') as map1", "monotonically_increasing_id() as id")
+
+    df1.selectExpr('id', 'explode(map1)') \
+       .groupby('id','key') \
+       .agg(F.collect_list('value').alias('value')) \
+       .groupby('id') \
+       .agg(F.map_from_entries(F.collect_list(F.struct('key','value'))).alias('map2')) \
+       .show(10,0)
+
+
+
+
+Example-2: use str_to_map 
+  REF: https://stackoverflow.com/questions/62539548
+
+    df = spark.createDataFrame([
+       (1,"department=Sales__title=Sales_executive__level=junior"),
+       (2,"department=Engineering__title=Software Engineer__level=entry-level")
+    ],['person_id','person_attributes']) 
+
+    df.selectExpr("person_id", "explode(str_to_map(person_attributes,'__','=')) as (attribute_key, attribute_value)") \
+      .filter('attribute_key != "level"') \
+      .show()
+    +---------+-------------+-----------------+
+    |person_id|attribute_key|  attribute_value|
+    +---------+-------------+-----------------+
+    |        1|   department|            Sales|
+    |        1|        title|  Sales_executive|
+    |        2|   department|      Engineering|
+    |        2|        title|Software Engineer|
+    +---------+-------------+-----------------+
+
+
