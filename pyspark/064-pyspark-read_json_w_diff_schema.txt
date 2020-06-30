@@ -1,0 +1,49 @@
+https://stackoverflow.com/questions/62559096/spark-dataframes-reading-json-having-duplicate-column-names-but-different-data
+
+Target: load files with slightly different schema:
+
+Method: load all JSON files with spark.read.text() and then parse the texts with json_tuple, from_json. notice for `stata` field we use coalesce to parse from two schema.
+
+Samples:
+ - in file_1: {"version": 1, "stats": {"hits": 20}}
+ - in file_2: {"version": 2, "stats": [{"hour": 1, "hits": 10}, {"hour": 2, "hits": 12}]}
+
+
+    from pyspark.sql.functions import json_tuple, coalesce, from_json, array
+
+    df = spark.read.text("/home/xicheng/test/json_2")
+
+    schema_1 = "array<truct<hour:int,hits:int>"
+    schema_2 = "struct<hour:int,hits:int>"
+
+    df.select(json_tuple('value', 'version', 'stats').alias('version', 'stats')) \
+        .withColumn('status', coalesce(from_json('stats', schema_1), array(from_json('stats', schema_2)))) \
+        .selectExpr('version', 'inline_outer(status)') \
+        .show()
+    +-------+----+----+
+    |version|hour|hits|
+    +-------+----+----+
+    |      2|   1|  10|
+    |      2|   2|  12|
+    |      1|null|  20|
+    +-------+----+----+
+
+Using Spark-SQL:
+
+    df.createOrReplaceTempView('tbl')
+
+    spark.sql("""
+    
+        with t1 as (
+          SELECT json_tuple(value, 'version', 'stats') as (version, stats) FROM tbl
+        )
+        SELECT `version`
+        , inline_outer(
+            coalesce(
+              from_json(stats, 'array<struct<hour:int,hits:int>>'), 
+              array(from_json(stats, 'struct<hour:int,hits:int>'))
+            )
+          )
+        FROM t1
+    
+    """).show()
