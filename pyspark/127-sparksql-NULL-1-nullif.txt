@@ -1,0 +1,59 @@
+nullif:
+
+> nullif(expr1, expr2) - Returns null if expr1 equals to expr2, or expr1 otherwise.
+
+
+---
+Example-1: use coalease and presume EMPTY string as NULL as well
+  REF: https://stackoverflow.com/questions/62438630/
+
+  df = spark.createDataFrame([(None,"","a"),("a","","b"),("",None,"c")],["desc1", "desc2", "desc3"])
+
+  df.createOrReplaceTempView("tb")
+
+  spark.sql("select *, coalesce(nullif(desc1,''), nullif(desc2,''), nullif(desc3,'')) as desc from tb").show()       
+  +-----+-----+-----+----+
+  |desc1|desc2|desc3|desc|
+  +-----+-----+-----+----+
+  | null|     |    a|   a|
+  |    a|     |    b|   a|
+  |     | null|    c|   c|
+  +-----+-----+-----+----+
+
+  nullif is a syntax sugar of `IF(desc1 = '', NULL, desc1)`
+
+
+
+Example-2: use as array indexing when array_position return ZERO
+  REF: https://stackoverflow.com/questions/62756768
+  Target: find the index of a matched item from an array column using array_position, then get the value of its 
+    next neighbouring position. Notice that array_position is 1-based while `arr[i]` is 0-based. if array_position does
+    not find any matches, it will return `0` which is the first item of arr or arr[0] and is valid, we will need to set
+    the index to NULL when array_position return `0`, this is handled by nullif:
+
+    df = spark.createDataFrame([
+          (1100, 'AN', 3300, 4400, 3301, 4400, 1100) 
+        , (2312, 'BAN', 3301, 4400, 3300, 2300, 1232) 
+        , (1100, 'C', 3300, 4400, 3301, 4400, 2346) 
+        , (1100, 'A', 3300, 4400, 3301, 4400, 9887)
+     ], ['col1', 'val1', 'col2', 'val2', 'col3', 'val3', 'col4']) 
+
+    df.withColumn('arr', F.array(df.columns)) \
+      .selectExpr(
+        'col1', 
+        'col2', 
+        'arr[nullif(array_position(arr, "3300"),0)] as X', 
+        'arr[nullif(array_position(arr, "3301"),0)] as Y'
+    ).show()
+    +----+----+----+----+
+    |col1|col2|   X|   Y|
+    +----+----+----+----+
+    |1100|3300|4400|4400|
+    |2312|3301|2300|4400|
+    |1100|3300|4400|4400|
+    |1100|3300|4400|4400|
+    +----+----+----+----+
+
+
+
+
