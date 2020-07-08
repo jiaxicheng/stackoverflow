@@ -1,0 +1,122 @@
+convert RDD into DataFrame:
+---
+
+
+Example-1: create dataframe from tuple'ed RDD:
+  REF: https://stackoverflow.com/questions/62767310/pyspark-convert-tuple-type-rdd-to-dataframe
+  Target: use pyspark.sql.Row class to convert tuples into Row objects:
+    (1) customized Row Class + unpacked list arguments
+    (2) Row class + unpacked dict arguments
+
+    from pyspark.sql import Row 
+
+    rdd = sc.parallelize([(20190701, [11,21,31], [('A',10), ('B', 20)])])
+
+Method-1: customize Row class and use toDF()
+
+    # preserve the Column order and unpacked lists as the arguments.
+    MRow = Row("date", "0", "1", "2", "A", "B")
+                   
+    rdd.map(lambda x: MRow(x[0], *x[1], *map(lambda e:e[1],x[2]))).toDF().show()
+    +--------+---+---+---+---+---+
+    |    date|  0|  1|  2|  A|  B|
+    +--------+---+---+---+---+---+
+    |20190701| 11| 21| 31| 10| 20|
+    +--------+---+---+---+---+---+
+
+Method-3: use Row() and toDF(), columns are ordered by alphanumeric order
+
+    rdd.map(lambda x: Row(date=x[0], **dict((str(i), e) for i,e in list(enumerate(x[1])) + x[2]))).toDF().show()       
+    +---+---+---+---+---+--------+
+    |  0|  1|  2|  A|  B|    date|
+    +---+---+---+---+---+--------+
+    | 11| 21| 31| 10| 20|20190701|
+    +---+---+---+---+---+--------+
+
+Method-2: given schema below and use spark.createDataFrame to setup DF:
+
+    schema = "date string, `0` int, `1` int, `2` int, A int, B int"
+
+    rdd1 = rdd.map(lambda x: MRow(x[0], *x[1], *map(lambda e:e[1],x[2])))
+    df = spark.createDataFrame(rdd1, schema)
+
+    or 
+
+    rdd1 = rdd.map(lambda x: tuple([x[0]] + x[1]  + [*map(lambda e:e[1],x[2])]))
+    df = spark.createDataFrame(rdd1, schema)
+
+
+
+Example-2: convert tuples into DataFrame
+  REF: https://stackoverflow.com/questions/62773154/sparkhow-to-turn-tuple-into-dataframe
+
+    rdd = sc.parallelize([('a',1), (('a',1), ('b',2)), (('a',1), ('b',2), ('c',3) ) ])
+
+    # convert tuples into dicts
+    rdd1 = rdd.map(lambda x: dict(x if isinstance(x[0],tuple) else [x])) 
+
+
+  Method-1: use customized Row class:
+
+    cols = ["a", "b", "c"]
+    MRow = Row(*cols)
+    rdd1.map(lambda x: MRow(*[x.get(e) for e in cols])).toDF().show()                                                   
+    +---+----+----+
+    |  a|   b|   c|
+    +---+----+----+
+    |  1|null|null|
+    |  1|   2|null|
+    |  1|   2|   3|
+    +---+----+----+
+
+  Method-2: toDF()
+
+    rdd1.map(lambda x: [x.get(e) for e in cols]).toDF(cols).show()
+    +---+----+----+
+    |  a|   b|   c|
+    +---+----+----+
+    |  1|null|null|
+    |  1|   2|null|
+    |  1|   2|   3|
+    +---+----+----+
+
+  Method-3: Row() + toDF()
+
+    df = rdd1.map(lambda x: Row(**{e:dict(x).get(e) for e in cols})).toDF()
+
+  Method-4: rdd1 + spark.read.json, more flexible, no need pre-define cols
+
+    df = spark.read.json(rdd1)
+
+
+
+Example-3: list/tuple items with toDF to generate different DataType in DF:
+  REF: https://stackoverflow.com/questions/62779551/rdd-with-tuples-of-different-size-to-dataframe
+  Notice: a list item will be converted into ArrayType column and a tuple item will be converted into StructType column
+   * list -> array
+   * tuple -> struct
+
+    rdd = sc.parallelize([
+        (491023, ((9,), (0.07971896408231094,), 'Debt collection')),
+        (491023, ((2, 14, 77, 22, 6, 3, 39, 7, 0, 1, 35, 84, 10, 8, 32, 13), (0.017180308460902963, 0.02751921818456658, 0.011887861159888378, 0.00859908577494079, 0.007521091815230704, 0.006522044953782423, 0.01032297079810829, 0.018976833302472455, 0.007634289723749076, 0.003033975857850723, 0.018805184361326378, 0.011217892399539534, 0.05106916198426676, 0.007901136066759178, 0.008895262042995653, 0.006665649645210911), 'Debt collection')),
+        (491023, ((36, 12, 50, 40, 5, 23, 58, 76, 11, 7, 65, 0, 1, 66, 16, 99, 98, 45, 13), (0.007528732561416072, 0.017248902490279026, 0.008083896178333739, 0.008274896865005982, 0.0210032206108319, 0.02048387345320946, 0.010225319903418824, 0.017842961406992965, 0.012026753813481164, 0.005154201637708568, 0.008274127579967948, 0.0168843021403551, 0.007416385430301767, 0.009257236955148311, 0.00590385362565239, 0.011031745337733267, 0.011076277004617665, 0.01575522984526745, 0.005431270081282964), 'Vehicle loan or lease')) ])
+
+    # using tuples as default, generated structs
+    rdd.map(lambda x: (x[0],) + x[1]).toDF()                                                                            
+    #DataFrame[_1: bigint, _2: struct<_1:bigint>, _3: struct<_1:double>, _4: string]
+
+    # map tuples into list, the result becomes arrays
+    df = rdd.map(lambda x: [x[0]] + [list(e) if isinstance(e,tuple) else e for e in x[1]]).toDF()
+    #DataFrame[_1: bigint, _2: array<bigint>, _3: array<double>, _4: string]
+
+    df.show()                                                                                                           
+    +------+--------------------+--------------------+--------------------+
+    |    _1|                  _2|                  _3|                  _4|
+    +------+--------------------+--------------------+--------------------+
+    |491023|                 [9]|[0.07971896408231...|     Debt collection|
+    |491023|[2, 14, 77, 22, 6...|[0.01718030846090...|     Debt collection|
+    |491023|[36, 12, 50, 40, ...|[0.00752873256141...|Vehicle loan or l...|
+    +------+--------------------+--------------------+--------------------+
+
+    
+
