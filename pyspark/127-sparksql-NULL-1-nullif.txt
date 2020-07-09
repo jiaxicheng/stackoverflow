@@ -25,7 +25,7 @@ Example-1: use coalease and presume EMPTY string as NULL as well
 
 
 Example-2: use as array indexing when array_position return ZERO
-  REF: https://stackoverflow.com/questions/62756768
+  REF: https://stackoverflow.com/questions/62770186
   Target: find the index of a matched item from an array column using array_position, then get the value of its 
     next neighbouring position. Notice that array_position is 1-based while `arr[i]` is 0-based. if array_position does
     not find any matches, it will return `0` which is the first item of arr or arr[0] and is valid, we will need to set
@@ -54,6 +54,33 @@ Example-2: use as array indexing when array_position return ZERO
     |1100|3300|4400|4400|
     +----+----+----+----+
 
+
+Example-3: use nullif with complex Data Types:
+
+  (1) ArrayType:
+
+    df = spark.createDataFrame([(1,["a", "b"]),(2,["foobar"])],["id", "name"])
+    df.withColumn("name", expr("nullif(name, array('a','b'))")).show()                                   
+    #+---+--------+
+    #| id|    name|
+    #+---+--------+
+    #|  1|    null|
+    #|  2|[foobar]|
+    #+---+--------+
+
+  (2) StructType:
+
+    df = spark.createDataFrame([(1,{"a":1, "b":2}),(2,{"a":3,"b":4})],"id int, name struct<a:int,b:int>")
+    df.withColumn("name", expr("nullif(name, (3 as a,4 as b))")).show()                                  
+    #+---+------+
+    #| id|  name|
+    #+---+------+
+    #|  1|[1, 2]|
+    #|  2|  null|
+    #+---+------+
+  
+  (3) MapType: 
+    return ERROR due to data type mismatch: EqualTo does not support ordering on type map<string,bigint>
 
 
 
