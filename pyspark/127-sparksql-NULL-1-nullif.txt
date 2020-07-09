@@ -84,3 +84,32 @@ Example-3: use nullif with complex Data Types:
 
 
 
+Example-4:
+  REF: https://stackoverflow.com/questions/62773595/pyspark-mapping-regex
+  Note: regexp_extract() return EMPTY string when non-match is found, use nullif to convert EMPTY to null
+        so we can handle it with coalesce
+
+    from pyspark.sql.functions import expr, coalesce, col
+
+    df =  spark.createDataFrame([
+      ("a1", "GDF2009"), ("a1", "GDF2014"), ("a2","ADS-set"), ("a2", "ADS-set"), 
+      ("a1", "XSQXQXQSDZADAA5454546a45a4-FI"), (None, "dadaccpjpifjpsjfefspolamml-FI"), 
+      ("a1", "dqdazdaapijiejoajojp565656-RH"), (None, "kijipiadoa")
+    ], ["action", "message"])
+   
+    mapper = expr("map('a1','GDF','a2', 'ADS', 'a3', 'HLP')")
+
+    df.withColumn('status', coalesce(expr("nullif(regexp_extract(message,'-(FI|RH)',1),'')"), mapper[col('action')])).show()
+    +------+--------------------+------+
+    |action|             message|status|
+    +------+--------------------+------+
+    |    a1|             GDF2009|   GDF|
+    |    a1|             GDF2014|   GDF|
+    |    a2|             ADS-set|   ADS|
+    |    a2|             ADS-set|   ADS|
+    |    a1|XSQXQXQSDZADAA545...|    FI|
+    |  null|dadaccpjpifjpsjfe...|    FI|
+    |    a1|dqdazdaapijiejoaj...|    RH|
+    |  null|          kijipiadoa|  null|
+    +------+--------------------+------+
+
