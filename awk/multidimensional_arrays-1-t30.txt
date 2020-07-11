@@ -1,0 +1,37 @@
+# XiCheng Jia Summer 2020 @ New York  2020/07/10
+# awk code to calculate standard deviation for several columns
+# REF: https://stackoverflow.com/questions/62778563
+# Use of Multi-dimensional arrays
+# Run with the following command:
+# $ awk -f t30.awk ifile*.txt
+# $ cat t30.awk
+
+{
+  nMax = FNR > nMax ? FNR : nMax                        # get the max FNR from all files
+  for (j=3; j<=NF; j++) {
+    if ($j == "?") continue
+    v[FNR, j] = v[FNR, j] == "" ? $j : v[FNR, j] FS $j  # concatenate values of (FNR,j) in `v` using FS
+    t[FNR, j] += $j                                     # calculate total for each (FNR,j)
+  }
+}
+END {
+  for (i=1; i<=nMax; i++) {
+    printf("%d\t", i)
+    for (j=3; j<=NF; j++) {
+      if ((i,j) in t) {         # if (i,j) exists, split v into vals using default FS
+        n = split(v[i,j], vals)
+        if (n == 1) {           # print "?" if only 1 item in array vals
+          printf("?")
+        } else {                # otherwise, calculate mean `e`, sum `s` and then std
+          e = t[i,j]/n
+          s = 0
+          for(x in vals) s += (vals[x]-e)**2
+          printf("%.2f", sqrt(s/(n-1)))
+        }
+      } else { # print "?" if (i,j) not exists
+        printf("?")
+      }
+      printf(j==NF?"\n":"\t")
+    }
+  }
+}
