@@ -26,4 +26,29 @@ PySpark write to JSON and keep entries with null values:
 Notes: json.dumps have issues dumping datetime.datetime and datetime.date to JSON, need some preprocessing
      to convert them to str, see `default` argument in the json.dumps method.
 
- 
+
+As of Spark 3.0+, json writer support a new option `ignoreNullFields` (default is True):
+--
+
+(1) default, skip NULLs:
+
+    df.withColumn('JSON', to_json(struct(df.columns))).show(truncate=False)
+    +----+---+----+----+---+-------------------------------------------+
+    |a1  |b1 |c1  |d1  |e1 |JSON                                       |
+    +----+---+----+----+---+-------------------------------------------+
+    |1   |a  |foo1|4   |5  |{"a1":1,"b1":"a","c1":"foo1","d1":4,"e1":5}|
+    |null|b  |bar |4   |6  |{"b1":"b","c1":"bar","d1":4,"e1":6}        |
+    |null|c  |mnc |null|7  |{"b1":"c","c1":"mnc","e1":7}               |
+    +----+---+----+----+---+-------------------------------------------+
+
+(2) keep NULLs:
+
+    df.withColumn('JSON', to_json(struct(df.columns),{"ignoreNullFields":False})).show(truncate=False)
+    +----+---+----+----+---+------------------------------------------------+
+    |a1  |b1 |c1  |d1  |e1 |JSON                                            |
+    +----+---+----+----+---+------------------------------------------------+
+    |1   |a  |foo1|4   |5  |{"a1":1,"b1":"a","c1":"foo1","d1":4,"e1":5}     |
+    |null|b  |bar |4   |6  |{"a1":null,"b1":"b","c1":"bar","d1":4,"e1":6}   |
+    |null|c  |mnc |null|7  |{"a1":null,"b1":"c","c1":"mnc","d1":null,"e1":7}|
+    +----+---+----+----+---+------------------------------------------------+
+
