@@ -30,25 +30,29 @@ Notes: json.dumps have issues dumping datetime.datetime and datetime.date to JSO
 As of Spark 3.0+, json writer support a new option `ignoreNullFields` (default is True):
 --
 
+    from pyspark.sql.functions import to_json, struct
+
+    df = spark.createDataFrame([(1,None,"foo"),(None,"bar",None)],["a","b","c"])
+
 (1) default, skip NULLs:
 
-    df.withColumn('JSON', to_json(struct(df.columns))).show(truncate=False)
-    +----+---+----+----+---+-------------------------------------------+
-    |a1  |b1 |c1  |d1  |e1 |JSON                                       |
-    +----+---+----+----+---+-------------------------------------------+
-    |1   |a  |foo1|4   |5  |{"a1":1,"b1":"a","c1":"foo1","d1":4,"e1":5}|
-    |null|b  |bar |4   |6  |{"b1":"b","c1":"bar","d1":4,"e1":6}        |
-    |null|c  |mnc |null|7  |{"b1":"c","c1":"mnc","e1":7}               |
-    +----+---+----+----+---+-------------------------------------------+
+    df.withColumn('JSON', to_json(struct("a","b","c"))).show()
+    +----+----+----+-----------------+
+    |   a|   b|   c|             JSON|
+    +----+----+----+-----------------+
+    |   1|null| foo|{"a":1,"c":"foo"}|
+    |null| bar|null|      {"b":"bar"}|
+    +----+----+----+-----------------+
+
 
 (2) keep NULLs:
 
-    df.withColumn('JSON', to_json(struct(df.columns),{"ignoreNullFields":False})).show(truncate=False)
-    +----+---+----+----+---+------------------------------------------------+
-    |a1  |b1 |c1  |d1  |e1 |JSON                                            |
-    +----+---+----+----+---+------------------------------------------------+
-    |1   |a  |foo1|4   |5  |{"a1":1,"b1":"a","c1":"foo1","d1":4,"e1":5}     |
-    |null|b  |bar |4   |6  |{"a1":null,"b1":"b","c1":"bar","d1":4,"e1":6}   |
-    |null|c  |mnc |null|7  |{"a1":null,"b1":"c","c1":"mnc","d1":null,"e1":7}|
-    +----+---+----+----+---+------------------------------------------------+
+    df.withColumn('JSON', to_json(struct("a","b","c"),{"ignoreNullFields":False})).show(truncate=False)
+    +----+----+----+-----------------------------+
+    |a   |b   |c   |JSON                         |
+    +----+----+----+-----------------------------+
+    |1   |null|foo |{"a":1,"b":null,"c":"foo"}   |
+    |null|bar |null|{"a":null,"b":"bar","c":null}|
+    +----+----+----+-----------------------------+
+
 
