@@ -5,29 +5,31 @@ PySpark write to JSON and keep entries with null values:
     from pyspark.sql import Row
     from json import dumps
     from datetime import datetime, date
-    from pyspark.sql.functions import col
+    from pyspark.sql.functions import col, struct
  
     df = spark.read.json('/home/xicheng/test/json-26.txt',multiLine=True)
 
-    # set up schema to convert t_date to timestamp and 
+    # set up schema to convert t_date to timestamp to test the function `mycon`
     schema = "struct<accept_language:string,app_id:string,app_name:string,client_ip_address:string" \
            + ",event_id:string,event_timestamp:string,offering_id:string,server_ip_address:string," \
            + "server_timestamp:bigint,t_date:timestamp,topic_name:string,version:string>"
 
-    df = df.withColumn("event_header", col("event_header").astype(schema))
+    # convert string to timestamp and merge all df.columns into one StructType column `value`
+    df = df.withColumn("event_header", col("event_header").astype(schema)).select(struct(df.columns).alias('value'))
 
     # issue using json.dumps convert datetime.datetime/datetime.date to JSON 
     # refer to link: https://code-maven.com/serialize-datetime-object-as-json-in-python
     mycon = lambda x: str(x) if isinstance(x, (datetime,date)) else None
     
-    df1 = df.rdd.mapPartitions(lambda it: (Row(value=dumps(e.asDict(recursive=True), default=mycon)) for e in it)).toDF()
-    df1.coalesce(1).write.mode("append").text("/home/xicheng/test/json-26")
+    df1 = df.rdd.mapPartitions(lambda it: (Row(value=dumps(e["value"].asDict(recursive=True), default=mycon)) for e in it)).toDF()
+    df1.coalesce(1).write.mode("append").text("/home/xicheng/test/out-26")
     
-Notes: json.dumps have issues dumping datetime.datetime and datetime.date to JSON, need some preprocessing
-     to convert them to str, see `default` argument in the json.dumps method.
-
 
 As of Spark 3.0+, json writer support a new option `ignoreNullFields` (default is True):
+
+    df.coalesce(1).write.option("ignoreNullFields",False).mode("overwrite").json("/home/xicheng/test/out-26")
+
+  Another example using to_json with `ignoreNullFields`:
 --
 
     from pyspark.sql.functions import to_json, struct
