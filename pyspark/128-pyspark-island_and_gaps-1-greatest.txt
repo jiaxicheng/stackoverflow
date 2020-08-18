@@ -2,7 +2,7 @@ Gaps & Islands:
 ---
 
 
-Example-1: island and group issue: Use Window function + greatest function
+Example-1: use Window function + greatest function
   REF: https://stackoverflow.com/questions/62513690/find-total-view-time
 
 Sample data:
@@ -96,4 +96,79 @@ Method-2: using aggregate function: Spark 2.4+
     +-------+------------+-------------------------------------+-----------+
     
 
+
+Example-2: using Window aggregate function and greatest():
+  REF: https://stackoverflow.com/questions/63464333/how-to-calcuate-the-overlap-date-in-pyspark
+
+  Target: find total years of experience based on several date ranges with any overlaps and/or gaps
+  Method: 
+    (1) convert `Experience_datesEmployeed` into two columns: start_date and end_date
+    (2) find the prev_max_date = max('end_date').over(w1) where w1 is from unboundedPreceding up to the previous row
+    (3) find the effective month_diff = `greatest(end_date,prev_max_date)` - `greatest(start_date,prev_max_date)`
+    (4) groupby and find the sum of month_diff
+
+  Code:
+
+    from pyspark.sql.functions import max as fmax, expr
+    from pyspark.sql import Window
+
+    df = spark.createDataFrame([
+       ('David', 'Feb 1999 - Sep 2001', 'Foothill', '2 yrs 8 mos', 'Marketing Assoicate'),
+       ('David', '1994 - 1997', ' abc', '3 yrs', 'Senior Auditor'),
+       ('David', 'Jun 2020 - Present', 'Fellows INC', '3 mos', 'Director Board'),
+       ('David', '2017 - Jun 2019', 'Fellows INC', '2 yrs', 'Fellow - Class 22'),
+       ('David', 'Sep 2001 - Present', 'The John D.', '19 yrs', 'Manager')
+     ], ['fullName', 'Experience_datesEmployeed', 'expcompany', 'expduraation', 'position'])
+
+  Step-1: find start_date and end_date of each Experience_datesEmployeed:
+
+    df1 = (df.withColumn('dates', expr("split(Experience_datesEmployeed, ' *- *')")) 
+        .withColumn('start_date', expr("coalesce(to_date(dates[0], 'MMM yyyy'), to_date(dates[0], 'yyyy'))")) 
+        .withColumn('end_date', expr("""
+            IF(dates[1] = 'Present', 
+               current_date(), 
+               last_day(coalesce(to_date(dates[1], 'MMM yyyy'), to_date(dates[1], 'yyyy') + interval 11 months)))
+         """))
+        .select('fullName', 'Experience_datesEmployeed','dates','start_date','end_date')
+         ) 
+         
+    df1.show() 
+    +--------+-------------------------+--------------------+----------+----------+
+    |fullName|Experience_datesEmployeed|               dates|start_date|  end_date|
+    +--------+-------------------------+--------------------+----------+----------+
+    |   David|      Feb 1999 - Sep 2001|[Feb 1999, Sep 2001]|1999-02-01|2001-09-30|
+    |   David|              1994 - 1997|        [1994, 1997]|1994-01-01|1997-12-31|
+    |   David|       Jun 2020 - Present| [Jun 2020, Present]|2020-06-01|2020-08-18|
+    |   David|          2017 - Jun 2019|    [2017, Jun 2019]|2017-01-01|2019-06-30|
+    |   David|       Sep 2001 - Present| [Sep 2001, Present]|2001-09-01|2020-08-18|
+    +--------+-------------------------+--------------------+----------+----------+
+
+  Step-2: find effctive_month_diff based on start_date, end_date and prev_max_date:
+
+    w1 = Window.partitionBy('fullName').orderBy('start_date').rowsBetween(Window.unboundedPreceding,-1)
+
+    df2 = (df1.withColumn('prev_max_date', fmax('end_date').over(w1)) 
+        .withColumn("effctive_month_diff", expr("""
+           round(months_between(greatest(end_date,prev_max_date),greatest(start_date,prev_max_date)),0)
+         """)))
+    +--------+-------------------------+--------------------+----------+----------+-------------+--------------------+
+    |fullName|Experience_datesEmployeed|               dates|start_date|  end_date|prev_max_date|effective_month_diff|
+    +--------+-------------------------+--------------------+----------+----------+-------------+--------------------+
+    |   David|              1994 - 1997|        [1994, 1997]|1994-01-01|1997-12-31|         null|                48.0|
+    |   David|      Feb 1999 - Sep 2001|[Feb 1999, Sep 2001]|1999-02-01|2001-09-30|   1997-12-31|                32.0|
+    |   David|       Sep 2001 - Present| [Sep 2001, Present]|2001-09-01|2020-08-18|   2001-09-30|               227.0|
+    |   David|          2017 - Jun 2019|    [2017, Jun 2019]|2017-01-01|2019-06-30|   2020-08-18|                 0.0|
+    |   David|       Jun 2020 - Present| [Jun 2020, Present]|2020-06-01|2020-08-18|   2020-08-18|                 0.0|
+    +--------+-------------------------+--------------------+----------+----------+-------------+--------------------+
+
+  Step-3: find Total_experience:
+
+    df2.groupby("fullName").agg(expr("round(sum(effctive_month_diff)/12,1) as Total_experience")).show()
+    +--------+----------------+                                                     
+    |fullName|Total_experience|
+    +--------+----------------+
+    |   David|            25.6|
+    +--------+----------------+
+
+        
     
