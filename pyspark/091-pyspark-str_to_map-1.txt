@@ -51,7 +51,6 @@ Example-1:
 
 
 
-
 Example-2: use str_to_map 
   REF: https://stackoverflow.com/questions/62539548
 
@@ -71,5 +70,23 @@ Example-2: use str_to_map
     |        2|   department|      Engineering|
     |        2|        title|Software Engineer|
     +---------+-------------+-----------------+
+
+
+
+Example-3: use str_to_map to partition values through file paths
+  REF: https://stackoverflow.com/questions/63388691
+
+    df = spark.createDataFrame([(e,) for e in 
+        ["abc://dev/folder1/date=20200813/id=1", "def://dev/folder25/id=3/date=20200814"]], ["file"])
+
+    df.selectExpr("*","str_to_map(file,'/','=') as m1") \
+      .selectExpr("file", "m1['date'] as date", "m1['id'] as id") \
+      .show(3,0)
+    +-------------------------------------+--------+---+
+    |file                                 |date    |id |
+    +-------------------------------------+--------+---+
+    |abc://dev/folder1/date=20200813/id=1 |20200813|1  |
+    |def://dev/folder25/id=3/date=20200814|20200814|3  |
+    +-------------------------------------+--------+---+
 
 
