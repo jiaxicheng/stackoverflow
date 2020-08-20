@@ -1,6 +1,17 @@
-https://stackoverflow.com/questions/62533896/how-to-find-columns-collection-with-not-null-values-in-pyspark
+Using concat_ws to skip NULL items of an ArrayType column
 
-Use concat_ws() to get a list of values except NULL:
+Some Notes:
+(1) similar to collect_list() which can skip NULL values from a ArrayType column, collect_list only used with 
+   aggregate context. For general text context, use concat_ws() as a replacement.
+(2) when all items to concat_ws() are NULLs, it will return EMPTY instead of NULL, to overcome this issue, use 
+   a when/otherwise method(see Example-2, Method-1)
+
+
+---
+Example-1: Use concat_ws() to get a list of values except NULL:
+  REF: https://stackoverflow.com/questions/62533896/how-to-find-columns-collection-with-not-null-values-in-pyspark
+  Method: Array items are column_names if column_value is not NULL, keep the concatenated values only there are
+    more than 2 column names(use `instr(arr, ',') > 0`).
 
     df = spark.createDataFrame([
         (None,None,None),(1,None,None),(None,1,None),
@@ -26,12 +37,62 @@ Use concat_ws() to get a list of values except NULL:
      |null    |1       |1       |column_2,column_3         |
      +--------+--------+--------+--------------------------+
 
-Notes:
- (1) similar to collect_list() which can skip NULL values from a list, collect_list only used with aggregate context.
-    For general text context, use concat_ws() as a replacement.
- (2) check if a char contains in a string, multiple choices:
-   + using string operations: instr, locate
-   + use regex: rlike
-  In this case, as long as comma exists, should be at least two columns (exception: comma contained in any column names which is rare)
+
+
+
+Example-2: use concat_ws + split to setup an array exclude NULL items
+  REF: https://stackoverflow.com/questions/63475801/pyspark-or-sql-consuming-coalesce
+  Target: find the first 3 non-NULL values on each row.
+
+    from pyspark.sql.functions import concat_ws, split, array, when, col, coalesce
+
+    df = spark.createDataFrame([
+        ('1', None, None, 'C', None, None), ('2', 'A', None, 'C', None, 'E'), ('3', 'A', 'B', 'C', None, None), 
+        ('4', 'A', 'B', 'C', 'D', 'E'), ('5', None, None, None, None, None), ('6', None, 'B', None, None, 'E'),
+        ('7', None, 'B', None, 'D', 'E') 
+    ], ['ID', 'in1', 'in2', 'in3', 'in4', 'in5']) 
+
+    cols = df.columns[1:]
+    N = 3
+
+  Method-1: using concat_ws + split:
+
+    df1 = df.withColumn('data', split(concat_ws('\0', *cols), '\0')) 
+
+    df1.select(df.columns + [col('data')[i].alias(f'out{i+1}') for i in range(N)]).show()
+    +---+----+----+----+----+----+----+----+----+
+    | ID| in1| in2| in3| in4| in5|out1|out2|out3|
+    +---+----+----+----+----+----+----+----+----+
+    |  1|null|null|   C|null|null|   C|null|null|
+    |  2|   A|null|   C|null|   E|   A|   C|   E|
+    |  3|   A|   B|   C|null|null|   A|   B|   C|
+    |  4|   A|   B|   C|   D|   E|   A|   B|   C|
+    |  5|null|null|null|null|null|    |null|null|
+    |  6|null|   B|null|null|   E|   B|   E|null|
+    |  7|null|   B|null|   D|   E|   B|   D|   E|
+    +---+----+----+----+----+----+----+----+----+
+
+    Note: to overcome the EMPTY in the above `out1`, need to add when/otherwise clause:
+
+      df1 = df.withColumn('data', when(coalesce(*cols).isNull(), array()).otherwise(split(concat_ws('\0', *cols), '\0')))
+
+
+  Method-2: using SparkSQL `filter` function (Spark 2.4+)
+
+    df1 = df.withColumn('data', expr(f"filter(array({','.join(f'`{c}`' for c in cols)}), x -> x is not NULL)"))
+
+    df1.select(df.columns + [col('data')[i].alias(f'out{i+1}') for i in range(N)]).show()
+    +---+----+----+----+----+----+----+----+----+
+    | ID| in1| in2| in3| in4| in5|out1|out2|out3|
+    +---+----+----+----+----+----+----+----+----+
+    |  1|null|null|   C|null|null|   C|null|null|
+    |  2|   A|null|   C|null|   E|   A|   C|   E|
+    |  3|   A|   B|   C|null|null|   A|   B|   C|
+    |  4|   A|   B|   C|   D|   E|   A|   B|   C|
+    |  5|null|null|null|null|null|null|null|null|
+    |  6|null|   B|null|null|   E|   B|   E|null|
+    |  7|null|   B|null|   D|   E|   B|   D|   E|
+    +---+----+----+----+----+----+----+----+----+
+
 
 
