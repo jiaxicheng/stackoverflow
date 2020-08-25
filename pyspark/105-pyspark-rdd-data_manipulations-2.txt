@@ -59,3 +59,32 @@ Example-6: dictionary as RDD elements, fix not hashable ERROR:
        .collect()
 
 
+
+Example-7: use combinations and zip:
+  REF:https://stackoverflow.com/questions/63494362/creating-combination-and-sum-of-value-lists-with-existing-key-pyspark
+  Target: find combination of two zipped lists:
+
+    from itertools import combinations 
+    rdd = sc.parallelize([('k1', ['v11', 'v12', 'v13'], [1,2,3]),('k2', ['v21', 'v22', 'v23'], [10,20,30])]) 
+
+    def my_combinations(row):
+      return [ (row[0], tuple(e[0] for e in c), sum(e[1] for e in c)) for c in combinations(zip(*row[1:]),2) ]
+
+    rdd.flatMap(my_combinations).collect()
+    #[('k1', ('v11', 'v12'), 3),
+    # ('k1', ('v11', 'v13'), 4),
+    # ('k1', ('v12', 'v13'), 5),
+    # ('k2', ('v21', 'v22'), 30),
+    # ('k2', ('v21', 'v23'), 40),
+    # ('k2', ('v22', 'v23'), 50)]
+
+  Some notes: 
+   (1) find the first items of a list of lists:
+
+    Method-1: using list-comprehension:   tuple(e[0] for e in c) 
+    Method-2: using zip               :   tuple([*zip(*c)][0])
+    Method-3: using map and itemgetter:   from operator import itemgetter
+                                          tuple(map(itemgetter(0), c))
+
+
+
