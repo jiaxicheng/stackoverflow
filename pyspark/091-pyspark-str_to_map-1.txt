@@ -90,3 +90,88 @@ Example-3: use str_to_map to partition values through file paths
     +-------------------------------------+--------+---+
 
 
+
+Example-4: use str_to_map to retrieve only wanted key/values in a StringType column
+  REF: https://stackoverflow.com/questions/63504785
+  Task: convert `feat` into a Map using SparkSQL str_to_map function, and then concatenate 
+        two keys(`1` and `5`) and their values:
+
+    df_new = df.selectExpr("*","str_to_map(feat, ' ', ':') m") \
+      .selectExpr("id", "concat_ws(' ', '1:'||m['1'], '5:'||m['5']) as feat")
+
+    df_new.show()
+    +---+-------+
+    | id|   feat|
+    +---+-------+
+    | u1|1:a 5:c|
+    | u2|    5:b|
+    +---+-------+
+
+  Note: `'1:'||m['1']` is the same as `concat('1:', m['1'])`. to use a dynamic list of keys:
+
+    select_idx = [1,5]
+
+    df_new = df.selectExpr("*","str_to_map(feat, ' ', ':') m") \
+        .selectExpr("id", f"concat_ws(' ', {','.join(f'{i}||m[{i}]' for i in select_idx)}) as feat")
+
+
+
+Example-5: find partition values from paths, similar to Example-3
+  REF: https://stackoverflow.com/questions/63579435
+  Task: filter last 3 days from data parsed from file paths
+
+    df = sqlContext.createDataFrame([
+      (1, '/raw/gsec/qradar/flows/dt=2019-12-01/hour=00/1585218406613_flows_20191201_00.jsonl'),
+      (2, '/raw/gsec/qradar/flows/dt=2019-11-30/hour=00/1585218406613_flows_20191201_00.jsonl'),
+      (3, '/raw/gsec/qradar/flows/dt=2019-11-29/hour=00/1585218406613_flows_20191201_00.jsonl'),
+      (4, '/raw/gsec/qradar/flows/dt=2019-11-28/hour=00/1585218406613_flows_20191201_00.jsonl'),
+      (5, '/raw/gsec/qradar/flows/dt=2019-11-27/hour=00/1585218406613_flows_20191201_00.jsonl')
+    ], ['id','partition']) 
+
+    df1 = df.selectExpr("*", "str_to_map(partition,'/','=')['dt'] as date")
+    +---+----------------------------------------------------------------------------------+----------+
+    |id |partition                                                                         |date      |
+    +---+----------------------------------------------------------------------------------+----------+
+    |1  |/raw/gsec/qradar/flows/dt=2019-12-01/hour=00/1585218406613_flows_20191201_00.jsonl|2019-12-01|
+    |2  |/raw/gsec/qradar/flows/dt=2019-11-30/hour=00/1585218406613_flows_20191201_00.jsonl|2019-11-30|
+    |3  |/raw/gsec/qradar/flows/dt=2019-11-29/hour=00/1585218406613_flows_20191201_00.jsonl|2019-11-29|
+    |4  |/raw/gsec/qradar/flows/dt=2019-11-28/hour=00/1585218406613_flows_20191201_00.jsonl|2019-11-28|
+    |5  |/raw/gsec/qradar/flows/dt=2019-11-27/hour=00/1585218406613_flows_20191201_00.jsonl|2019-11-27|
+    +---+----------------------------------------------------------------------------------+----------+
+
+
+
+Example-6: read key/value configuration file with lineSep and then do str_to_map
+  REF: https://stackoverflow.com/questions/63705035
+  Task: this is useful when parsing configurations files with MultiLine mode
+  input file:
+<Begin  
+Id=1  
+Name=John  
+Age=32  
+<End  
+
+<Begin  
+Id=2  
+Name=Jack  
+Age=20  
+<End
+
+    # read the above file using spark.read.text with lineSep='<End'
+    df = spark.read.text('/home/xicheng/test/lineSep-1.txt', lineSep='<End')
+
+    cols = ['Id', 'Name', 'Age']
+
+    df.selectExpr("str_to_map(value,'\n','=') as map").selectExpr([f"trim(map['{c}']) as `{c}`" for c in cols]).show()
+    +----+----+----+
+    |  Id|Name| Age|
+    +----+----+----+
+    |   1|John|  32|
+    |   2|Jack|  20|
+    |null|null|null|
+    +----+----+----+
+
+
+
+
+
