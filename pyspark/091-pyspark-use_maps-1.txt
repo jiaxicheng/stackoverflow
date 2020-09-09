@@ -1,15 +1,25 @@
-https://stackoverflow.com/questions/61823544/pyspark-mapping-multiple-columns/61829008#61829008
+use MapType:
+---
 
-create a Map from the dataframe `reference_df` with:
+Example-1: create dict using `rdd.collectMap()` and use map
+  REF: https://stackoverflow.com/questions/61823544/pyspark-mapping-multiple-columns/61829008#61829008
+  Method: 
+   (1) create a Map from the dataframe `reference_df` with:
 
-    map_key = concat_ws('\0', PrimaryLookupAttributeName, PrimaryLookupAttributeValue)
-    map_value = OutputItemNameByValue
+        map_key = concat_ws('\0', PrimaryLookupAttributeName, PrimaryLookupAttributeValue)
+        map_value = OutputItemNameByValue
 
-and then apply it to another dataframe `df1` with the key: 
+      and then apply it to another dataframe `df1` with the key: 
 
-    concat_ws('\0', <col_name>, <col_value>) 
+        concat_ws('\0', <col_name>, <col_value>) 
     
-where `col` is from a List `primaryLookupAttributeName_List`:
+      where `col` is from a List `primaryLookupAttributeName_List`
+
+   (2) create a dictionary using: 
+   
+       df.select(key_col, value_col).rdd.collectAsMap()
+
+  Code:
     
     from pyspark.sql.functions import collect_set, array, concat_ws, lit, col, create_map
    
@@ -18,7 +28,9 @@ where `col` is from a List `primaryLookupAttributeName_List`:
 
     primaryLookupAttributeName_List = ['LeaseType', 'LeaseRecoveryType', 'LeaseStatus']
     
-    d = reference_df.agg(collect_set(array(concat_ws('\0','PrimaryLookupAttributeName','PrimaryLookupAttributeValue'), 'OutputItemNameByValue')).alias('m')).first().m
+    d = reference_df.select(
+        concat_ws('\0','PrimaryLookupAttributeName','PrimaryLookupAttributeValue'), 'OutputItemNameByValue'
+    ).rdd.collectAsMap().items()
     #[['LeaseStatus\x00Abandoned', 'Active'],
     # ['LeaseStatus\x00DEFAULT', 'Pending'],
     # ['LeaseRecoveryType\x00Gross-modified', 'Modified Gross'],
@@ -52,3 +64,75 @@ where `col` is from a List `primaryLookupAttributeName_List`:
     |          ABC123|...|                       Lookup not found|                                 Modified Gross|                                  Expired|
     |          ABC123|...|                       Lookup not found|                                 Modified Gross|                                  Pending|
     +----------------+...+---------------------------------------+-----------------------------------------------+-----------------------------------------+
+
+
+ 
+Example-2: create map using SQL syntax and map_from_entries + transform
+  REF: https://stackoverflow.com/questions/63774092
+  Task: create new columns based on col2 and its values mapped from 5 sets
+    
+    from pyspark.sql.functions import expr, split
+    
+    df = spark.createDataFrame([
+      (1, 'b1, a1, c1'), (2, 'a2, b2'), (3, 'e3, d3, a3, c3, b3')
+    ], ['col1', 'col2'])
+    
+    set1 = ['a1', 'a2', 'a3', 'a4', 'a5'] 
+    set2 = ['b1', 'b2', 'b3', 'b4', 'b5'] 
+    set3 = ['c1', 'c2', 'c3', 'c4', 'c5'] 
+    set4 = ['d1', 'd2', 'd3', 'd4', 'd5'] 
+    set5 = ['e1', 'e2', 'e3', 'e4', 'e5']
+    
+    sets = [set1, set2, set3, set4, set5]
+    
+    map1 = f"""map({','.join(f"'{e}', {i}" for i,s in enumerate(sets) for e in s)})"""
+    # "map('a1', 0,'a2', 0,'a3', 0,'a4', 0,'a5', 0,'b1', 1,'b2', 1,'b3', 1,'b4', 1,'b5', 1,'c1', 2
+    # ,'c2', 2,'c3', 2,'c4', 2,'c5', 2,'d1', 3,'d2', 3,'d3', 3,'d4', 3,'d5', 3,'e1', 4,'e2', 4
+    # ,'e3', 4,'e4', 4,'e5', 4)"
+    
+    map2 = expr(f"map_from_entries(transform(data, x -> ({map1}[x],x)))")
+    
+    df_new = (df.withColumn('data', split('col2', r'\s*,\s*')) 
+        .select('col1', *[ map2[i].alias(f"col{i+3}") for i in range(5) ]) 
+    ) 
+    +----+----+----+----+----+----+
+    |col1|col3|col4|col5|col6|col7|
+    +----+----+----+----+----+----+
+    |   1|  a1|  b1|  c1|null|null|
+    |   2|  a2|  b2|null|null|null|
+    |   3|  a3|  b3|  c3|  d3|  e3|
+    +----+----+----+----+----+----+
+    
+
+
+Example-3: create a map with array of string as values:
+  REF: https://stackoverflow.com/questions/63788176
+  Task: set a new column with true/false if brand + type combo is shown in a list.
+
+  Method-1: use create_map and list comprehension to create a map<string,array<string>>
+
+    from pyspark.sql.functions import arrays_overlap, array, lit, col, create_map
+    
+    dict1 = {'Casio': ["Casio G'zOne Ravine"],
+             'Alcatel': ['3L'],
+             'Acer': ['Acer Predator 8', 'liquid Z6 Plus'],
+             'Apple': ['iPhone EE', 'iPhone 11 Pro', 'iPhone XS']}
+
+    # create a map<string,array<string>> with brand as key and array of types as value
+    map1 = create_map([ t for k,v in dict1.items() for t in [lit(k), array(*[lit(e) for e in v])] ])
+
+    df.withColumn('Match', arrays_overlap('type', map1[col('brand')])).show(5,0)
+    +-------+-------------------------------------+-----+
+    |brand  |type                                 |Match|
+    +-------+-------------------------------------+-----+
+    |Apple  |[iPhone EE, iPhone 11, iPhone 11 Pro]|true |
+    |Acer   |[Iconia Talk S, liquid Z6 Plus]      |true |
+    |Casio  |[Casio G'zOne Brigade]               |false|
+    |Alcatel|[]                                   |false|
+    +-------+-------------------------------------+-----+
+
+
+    Note: if None (or NULL) is allowed in the list of types, arrays_overlap might return NULL, in such case
+     add `coalesce(arrays_overlap(...), false)`, or use `size(array_intersect()) > 0` to replace arrays_overlap()
+
+
