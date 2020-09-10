@@ -1,7 +1,14 @@
 Using str_to_map:
 ---
+Creates a map after splitting the text into key/value pairs using delimiters.
+
+   str_to_map(text[, pairDelim[, keyValueDelim]])  
+  
+(1) Default delimiters are ',' for pairDelim and ':' for keyValueDelim. 
+(2) Both pairDelim and keyValueDelim are treated as regular expressions.
 
 
+---
 Example-1: 
  REF: https://stackoverflow.com/questions/62024564/split-1-long-txt-column-into-2-columns-in-pysparkdatabricks
 
@@ -37,8 +44,9 @@ Example-1:
     +----------+----------+
 
 
- Notes: in case duplicate keys exist, the above method will only retrieve the first key/value pairs, to overcome 
-   this issue, need to do the following:
+ Notes: 
+  (1) in case duplicate keys exist, the above method will only retrieve the first key/value pairs, to overcome 
+      this issue, need to do the following:
 
     df1 = df.selectExpr("str_to_map(event_list, '~', ':') as map1", "monotonically_increasing_id() as id")
 
@@ -48,6 +56,8 @@ Example-1:
        .groupby('id') \
        .agg(F.map_from_entries(F.collect_list(F.struct('key','value'))).alias('map2')) \
        .show(10,0)
+
+  (2) For Spark 3.0+, duplicate keys yield ERROR, to overcome this, set "spark.sql.mapKeyDedupPolicy" to "LAST_WIN"
 
 
 
@@ -173,5 +183,65 @@ Age=20
 
 
 
+Example-7: set up map based on conditions, use regex pattern for delimiters
+  REF: https://stackoverflow.com/questions/63767366/
+  Rules:
+   (1) do not process if contextMap_ID1 contains the word 'TimeStamp' or it contains AlphaNumeric without ':'
+   (2) New Column with 'ReceiptNum' -> contextMap_ID1 if contextMap_ID1 contains NUMERIC 9 digit Number
+       or Alpha-NUMERIC starting with 'ABC'
+   (3) else: Multiple key value pairs to New Column(s) with key as column Name
 
+Code:
+
+    dfx = sc.parallelize([ 
+        ("blah blah blah createdTimeStamp=2020-08-11 15:31:37.458 blah blah blah",) 
+      , (123456789,), ("caseId: 2345678 personId: 87654321", ), ("CRON",), ("ABC9876543210",) 
+    ]).toDF(["contextMap_ID1"]) 
+
+    sql_expr = """ 
+      CASE 
+        WHEN contextMap_ID1 RLIKE '^(?:ABC[0-9]+|[0-9]{9})$' THEN map('ReceiptNum', contextMap_ID1) 
+        WHEN contextMap_ID1 RLIKE '(?:^(?!.*:)(?=.*[A-Z])|TimeStamp)' THEN NULL 
+        ELSE str_to_map(trim(contextMap_ID1),'(?<!:) +', ': *') 
+      END as map1 
+    """  
+
+    dfx.selectExpr("contextMap_ID1", sql_expr).show(truncate=False)                                                    
+    +----------------------------------------------------------------------+-----------------------------------------+
+    |contextMap_ID1                                                        |map1                                     |
+    +----------------------------------------------------------------------+-----------------------------------------+
+    |blah blah blah createdTimeStamp=2020-08-11 15:31:37.458 blah blah blah|null                                     |
+    |123456789                                                             |[ReceiptNum -> 123456789]                |
+    |caseId: 2345678 personId: 87654321                                    |[caseId -> 2345678, personId -> 87654321]|
+    |CRON                                                                  |null                                     |
+    |ABC9876543210                                                         |[ReceiptNum -> ABC9876543210]            |
+    +----------------------------------------------------------------------+-----------------------------------------+
+
+  An small exercise: if value of map1 is NULL then convert it to map('ReceiptNum', k)
+
+    from pyspark.sql.functions import expr
+
+    df = spark.createDataFrame([ (0, "caseId: 12345 personId: 45678"), (1, "I0E0932846637")
+        , (2, "caseId: 12345"), (3, None), (4, "anum: 123 mgr: 1234")], ["id", "contextMapID1"])
+
+    # return logic using two name_struct, the field name must be forced consistent
+    sql_expr1 = expr("""
+      map_from_entries(transform(map_keys(map1), k -> nvl2(map1[k],(k,map1[k] as v), ('ReceiptNum' as k,k as v))))
+    """)
+
+    # return logic packed in one named_struct, the field name can be skipped
+    sql_expr2 = expr("""
+      map_from_entries(transform(map_keys(map1), k -> (nvl2(map1[k],k,'ReceiptNum'), ifnull(map1[k],k))))
+    """)
+
+    df.selectExpr("*", "str_to_map(trim(contextMapID1),'(?<!:) +', ': *') as map1").withColumn('map1', sql_expr1).show(10,0)o
+    +---+-----------------------------+------------------------------------+
+    |id |contextMapID1                |map1                                |
+    +---+-----------------------------+------------------------------------+
+    |0  |caseId: 12345 personId: 45678|[caseId -> 12345, personId -> 45678]|
+    |1  |I0E0932846637                |[ReceiptNum -> I0E0932846637]       |
+    |2  |caseId: 12345                |[caseId -> 12345]                   |
+    |3  |null                         |null                                |
+    |4  |anum: 123 mgr: 1234          |[anum -> 123, mgr -> 1234]          |
+    +---+-----------------------------+------------------------------------+
 
