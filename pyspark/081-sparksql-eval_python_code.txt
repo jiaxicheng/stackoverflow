@@ -1,5 +1,10 @@
-evaluate a column containing Python code, and run it with SQL:
-notice that this only works with Python expression, not SQL expression)
+eval code saved in a Dataframe Column
+
+
+--
+Example-1: use udf() to eval the Python-based code saved in a column:
+  Task: evaluate a column containing Python code, and run it with SQL:
+  Note: this only works with Python expression, not SQL expression)
 
     df = spark.read.csv("/home/xicheng/test/eval-1.txt", header=True, inferSchema=True)
     
@@ -21,10 +26,97 @@ notice that this only works with Python expression, not SQL expression)
     |(var1 == 2) & (var2 >= 0)|9   |0   |false|
     +-------------------------+----+----+-----+
     
+ REF:
+  (1) https://stackoverflow.com/questions/62478849/pyspark-pass-a-value-from-another-column-as-the-parameter-of-spark
+  (2) https://stackoverflow.com/questions/49999119/how-to-evaluate-expressions-that-are-the-column-values/50010599
+  (3) https://stackoverflow.com/questions/57657692/pyspark-process-expression-in-dataframe 
+
+
+Example-2: eval Python-formula and use the variable-value map saved in another dataframe
+  REF: https://stackoverflow.com/questions/63868572/pyspark-evaluate-formula
+  
+  Code:
+
+    df = spark.createDataFrame([(1,"(a/(b+c))*100"),(2,"m/n*100"),(3,"d")],["ID", "Formula"])
+
+    df_val = spark.createDataFrame([("a",4),("b",3),("c",8),("d",7),("m",2),("n",5)],["ID", "Value"])
+
+ Method-1: if df_val is not big and can be loaded into a Python dict:
+
+    from pyspark.sql.functions import udf, create_map, lit
+
+    map1 = df_val.rdd.collectAsMap()
+
+    @udf("string")
+    def eval_formula_1(f):
+      try:
+        return eval(re.sub(r'\w+', lambda m: str(map1.get(m.group(0),m.group(0))), f))
+      except:
+        return None
+
+    df.select("*", eval_formula_1('Formula').astype('decimal(10,2)').alias('result')).show()
+    +---+-------------+------+
+    | ID|      Formula|result|
+    +---+-------------+------+
+    |  1|(a/(b+c))*100| 36.36|
+    |  2|      m/n*100| 40.00|
+    |  3|            d|  7.00|
+    +---+-------------+------+
+
+
+ Method-2: if df_val is huge and not easy to handle in a single dict:
     
-REF:
- (1) https://stackoverflow.com/questions/62478849/pyspark-pass-a-value-from-another-column-as-the-parameter-of-spark-function
- (2) https://stackoverflow.com/questions/49999119/how-to-evaluate-expressions-that-are-the-column-values/50010599
- (3) https://stackoverflow.com/questions/57657692/pyspark-process-expression-in-dataframe 
+  Step-1: tokenize Formula (removed all non-words), create an array `vars`
+
+    # if only alphanum are allowed
+    df1 = df.selectExpr("*", "flatten(sentences(Formula)) as vars")
+    +---+-------------+--------------+
+    | ID|      Formula|          vals|
+    +---+-------------+--------------+
+    |  1|(a/(b+c))*100|[a, b, c, 100]|
+    |  2|      m/n*100|   [m, n, 100]|
+    |  3|            d|           [d]|
+    +---+-------------+--------------+
+
+    # if underscore is allowed
+    #df1 = df.selectExpr("*", "filter(split(Formula,'\\\W+'), x -> nullif(x,'') is not NULL) as vars")
+
+  Step-2: left-join df1 and df2 using array_contains and then for each ID find all associated vars/Value
+          and save them into a Map: map1
+
+    df2 = df1.join(df_val.withColumnRenamed("ID", "var"), expr("array_contains(vars, var)"), "left") \
+        .groupby("ID") \
+        .agg(
+          expr('first(Formula) as Formula'), 
+          expr('map_from_entries(collect_list((var, string(Value)))) as map1')
+        )
+    +---+-------------+------------------------+                                    
+    |ID |Formula      |map1                    |
+    +---+-------------+------------------------+
+    |1  |(a/(b+c))*100|[a -> 4, b -> 3, c -> 8]|
+    |3  |d            |[d -> 7]                |
+    |2  |m/n*100      |[m -> 2, n -> 5]        |
+    +---+-------------+------------------------+
+
+  Step-3: create udf to eval Formula using the map1 var->Value dict
+
+    import re
+    from pyspark.sql.functions import udf
+    
+    @udf("string")
+    def eval_formula_2(f, d): 
+      try:
+        return eval(re.sub(r'\w+', lambda m:  str(d.get(m.group(0),m.group(0))), f))
+      except:
+        return None
+
+    df2.withColumn('result', eval_formula_2('Formula', 'map1').astype('decimal(10,2)')).show(truncate=False)
+    +---+-------------+------------------------+------+                             
+    |ID |Formula      |map1                    |result|
+    +---+-------------+------------------------+------+
+    |1  |(a/(b+c))*100|[a -> 4, b -> 3, c -> 8]|36.36 |
+    |3  |d            |[d -> 7]                |7.00  |
+    |2  |m/n*100      |[m -> 2, n -> 5]        |40.00 |
+    +---+-------------+------------------------+------+
 
 
