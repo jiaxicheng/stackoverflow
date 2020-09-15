@@ -115,3 +115,53 @@ Example-3: Use GraphFrame.connectedComponents to find the root_id(parent_id is N
     +---+-------+
 
 
+
+Example-4: use connectedComponents to find start and end nodes of any independant chain (remove intermediate nodes)
+  REF: https://stackoverflow.com/questions/63826536/how-build-parent-child-relationship-in-pyspark-or-python
+  Method: 
+    (1) create Graph based on the given df and find g.connectedComponents and group ids for the same `component`
+    (2) join with edges using `arrays_overlap(ids, array(src,dst))`, so we find related edges all in the same `component`
+    (3) for the same component, find all nodes in `srcs` and `dsts`
+    (4) use array_except to find nodes from ids which is in srcs but not in dsts
+    (5) use two `transform` to get all  of permutations from srcs to dsts
+  Note: the values of `df1.component` has nothing to do with the values of edges.src or edges.dst
+
+  Code:
+
+    from graphframes import GraphFrame
+    from pyspark.sql.functions import collect_set, first, expr
+
+    df = spark.createDataFrame([(20,2),(1,2),(3,4),(5,6) ,(7,8),(9,10),(2,11),(4,12),(6,13),(8,14),(14,19)],['key', 'value'])
+
+    spark.sparkContext.setCheckpointDir("/tmp/111")
+    spark.conf.set('spark.sql.shuffle.partitions', 5)
+
+    # setup graph
+    edges = df.toDF('src','dst')
+    vertices = edges.selectExpr('src as id').distinct().union(edges.select('dst').distinct())
+    g = GraphFrame(vertices, edges)
+    
+    df1 = g.connectedComponents()
+    
+    df1.groupby('component') \
+       .agg(collect_set('id').alias('ids')) \
+       .join(edges, expr("arrays_overlap(ids, array(src,dst))")) \
+       .groupby('component') \
+       .agg(
+           first('ids').alias('ids'), 
+           collect_set('src').alias('srcs'),
+           collect_set('dst').alias('dsts')
+        ).selectExpr("array_except(ids, dsts) as srcs", "array_except(ids, srcs) as dsts") \
+       .selectExpr("inline(flatten(transform(srcs, x -> transform(dsts, y -> (x as src, y as dst)))))") \
+       .show()
+    +---+---+
+    |src|dst|
+    +---+---+
+    |  7| 19|
+    |  3| 12|
+    |  5| 13|
+    |  1| 11|
+    | 20| 11|
+    |  9| 10|
+    +---+---+
+
