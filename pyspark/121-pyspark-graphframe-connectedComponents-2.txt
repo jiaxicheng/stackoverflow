@@ -165,3 +165,230 @@ Example-4: use connectedComponents to find start and end nodes of any independan
     |  9| 10|
     +---+---+
 
+
+
+Example-5: groupby synonyms and sum the frequency
+  REF: https://stackoverflow.com/questions/63705803/merge-related-words-in-nlp
+  Task: find all words that are synonyms and group them and do aggregation sum.
+
+    from PyDictionary import PyDictionary
+    from pyspark.sql.functions import pandas_udf, expr
+    from pandas import Series
+    from graphframes import GraphFrame
+    from pyspark.sql.functions import collect_set, first, expr
+
+    df = spark.createDataFrame([
+      ("mom", 250),("2020", 151), ("the", 124), ("19", 82), ("mother", 81), 
+      ("London", 6), ("life", 6), ("something", 6), ("father", 12), ("mummy", 1), ("dad", 15),
+      (None, 12), ("sdfsdgdfgh",1)
+    ], ["Word", "Frequency"])
+
+  Step-1: use PyDictionary(e).getSynonyms()[0][e] to find all synonyms of word `e` into ArrayType column `words`
+
+    def _get_synonyms(word):
+      try:
+        return PyDictionary(word).getSynonyms()[0].get(word)
+      except:
+        return None
+
+    @pandas_udf("array<string>") 
+    def get_synonyms(s: Series) -> Series: 
+      return Series([*map(_get_synonyms, s)])
+
+    df1 = df.withColumn('words', get_synonyms('Word'))
+
+    df1.show(20,80)
+    +----------+---------+--------------------------------------------------------------------------------+
+    |      Word|Frequency|                                                                           words|
+    +----------+---------+--------------------------------------------------------------------------------+
+    |       mom|      250|       [mummy, female parent, mum, mother, mammy, momma, mama, mamma, mommy, ma]|
+    |      2020|      151|                       [acuity, twenty-twenty, visual acuity, sharp-sightedness]|
+    |       the|      124|   [medication, over-the-counter medicine, medicine, medicinal drug, medicament]|
+    |        19|       82|                                                       [xix, nineteen, cardinal]|
+    |    mother|       81|[mother-in-law, female parent, supermom, mum, parent, mom, momma, para I, mam...|
+    |    London|        6|[the City, Trafalgar Square, West End, capital of the United Kingdom, Pall Ma...|
+    |      life|        6|                                                            [experience, living]|
+    | something|        6|                     [mid-thirties, time of life, maturity, adulthood, thirties]|
+    |    father|       12|[pappa, father-in-law, old man, pater, daddy, pa, male parent, parent, begett...|
+    |     mummy|        1|         [female parent, mum, mother, mammy, mom, momma, mama, mamma, mommy, ma]|
+    |       dad|       15|              [father, pappa, daddy, pa, male parent, begetter, papa, pop, dada]|
+    |      null|       12|                                                                            null|
+    |sdfsdgdfgh|        1|                                                                            null|
+    +----------+---------+--------------------------------------------------------------------------------+
+
+ Step-2: setup Graph vertices
+
+    # set up local testing environment for graphframe
+    spark.sparkContext.setCheckpointDir("/tmp/111")
+    spark.conf.set('spark.sql.shuffle.partitions', 5)
+
+    # set up Graph
+    vertices = df1.selectExpr('Word as id', 'Frequency')
+    vertices.show()
+    +----------+---------+
+    |        id|Frequency|
+    +----------+---------+
+    |       mom|      250|
+    |      2020|      151|
+    |       the|      124|
+    |        19|       82|
+    |    mother|       81|
+    |    London|        6|
+    |      life|        6|
+    | something|        6|
+    |    father|       12|
+    |     mummy|        1|
+    |       dad|       15|
+    |      null|       12|
+    |sdfsdgdfgh|        1|
+    +----------+---------+
+
+ Step-3: do a self-join to find all `Word` existing in `words` and then set up edges
+
+    edges = df1.join(df1.selectExpr('Word as w'), expr("array_contains(words,w)")) \
+        .selectExpr('Word as src', 'w as dst')
+    edges.show() 
+    +---------+------+
+    |      src|   dst|
+    +---------+------+
+    |      mom|mother|
+    |      mom| mummy|
+    |   mother|   mom|
+    |   mother| mummy|
+    |   father|   dad|
+    |    mummy|   mom|
+    |    mummy|mother|
+    |      dad|father|
+    +---------+------+
+
+ Step-4: set up Graph `g`, get g.connectedComponents() and group by the resultng `component` and then do the aggregation
+
+    g = GraphFrame(vertices, edges)
+
+    # use g.connectedComponents to find all connected Words
+    df2 = g.connectedComponents()
+    df2.show()
+    +----------+---------+-----------+
+    |        id|Frequency|  component|
+    +----------+---------+-----------+
+    |       mom|      250| 8589934592|
+    |      2020|      151|          1|
+    |       the|      124|          5|
+    |        19|       82|          0|
+    |    mother|       81| 8589934592|
+    |    London|        6|          2|
+    |      life|        6|17179869186|
+    | something|        6|25769803776|
+    |    father|       12|          3|
+    |     mummy|        1| 8589934592|
+    |       dad|       15|          3|
+    |sdfsdgdfgh|        1|          4|
+    +----------+---------+-----------+
+
+    df_new = df2.groupby('component').agg(expr('collect_list(id) as ids'), expr('sum(Frequency) as Frequency'))
+    df_new.show(truncate=False)
+    +-----------+--------------------+---------+
+    |component  |ids                 |Frequency|
+    +-----------+--------------------+---------+
+    |0          |[19]                |82       |
+    |25769803776|[something]         |6        |
+    |4          |[sdfsdgdfgh]        |1        |
+    |3          |[father, dad]       |27       |
+    |8589934592 |[mom, mother, mummy]|332      |
+    |5          |[the]               |124      |
+    |2          |[London]            |6        |
+    |17179869186|[life]              |6        |
+    |1          |[2020]              |151      |
+    +-----------+--------------------+---------+
+
+    # None(if exists) is missing from the above output, just add the row by union
+    df_new = df_new.union(df.selectExpr("NULL", "NULL", "Frequency").where("Word is NULL"))
+
+  Notes:
+   (1) if `parent` is also a `Word`, then father, mother, parent etc will be grouped into a single group
+   (2) NULL value will be dropped when running `df2 = g.connectedComponents()`, either add it back using an union later
+       or fillna('___') before processing and then replace it back to None
+   (3) Another way retriving related words based on `Life is complex`@stackoverflow
+
+        from nltk.corpus import wordnet
+
+        def _get_synonyms_1(word):
+          return list(set(x for e in wordnet.synsets(word) for x in e.lemma_names())) if word else None
+
+        test nltk.corpus.wordnet: _get_synonyms_1('mother')
+        # ['get', 'mother', 'overprotect', 'engender', 'generate', 'bring_forth', 
+        #  'female_parent', 'sire', 'fuss', 'beget', 'father']
+
+        test PyDictionary/getSynonyms: _get_synonyms('mother') 
+        # ['mother-in-law', 'female parent', 'supermom', 'mum', 'parent', 'mom', 'momma', 'para I',
+        #  'mama', 'mummy', 'quadripara', 'mommy', 'quintipara', 'ma', 'puerpera', 'surrogate mother',
+        #  'mater', 'primipara', 'mammy', 'mamma']
+
+
+ Method-2: Use Pandas + networkx: 
+
+    from functools import reduce
+    import networkx as nx
+
+    def _get_synonyms(word):
+      try:
+        return PyDictionary(word).getSynonyms()[0].get(word)
+      except:
+        return None
+
+    pdf['words'] = [*map(_get_synonyms, pdf['Word'])]
+
+    # notice dropna() is important, or None will be added into edges
+    edges = pdf[["Word"]].dropna() \
+        .merge(pdf[["words","Word"]].explode('words'), left_on="Word", right_on="words") \
+        .rename(columns={"Word_x":"source", "Word_y":"target"}) \
+        .drop('words', axis=1)
+    #   source  target
+    #0     mom  mother
+    #1     mom   mummy
+    #2  mother     mom
+    #3  mother   mummy
+    #4  father     dad
+    #5   mummy     mom
+    #6   mummy  mother
+    #7     dad  father
+
+    G = nx.from_pandas_edgelist(edges)
+
+    connected = [* nx.connected_components(G) ]
+    #[{'mom', 'mother', 'mummy'}, {'dad', 'father'}]
+
+    checked = reduce(lambda x,y: x|y, connected)
+    #{'dad', 'father', 'mom', 'mother', 'mummy'}
+
+    d1 = dict([ (x,i) for i,y in enumerate(connected + [ {e} for e in pdf["Word"] if e not in checked ]) for x in y ])
+    #{'mother': 0,
+    # 'mom': 0,
+    # 'mummy': 0,
+    # 'father': 1,
+    # 'dad': 1,
+    # '2020': 2,
+    # 'the': 3,
+    # '19': 4,
+    # 'London': 5,
+    # 'life': 6,
+    # 'something': 7,
+    # None: 8,
+    # 'sdfsdgdfgh': 9}
+
+    pdf['group'] = pdf['Word'].map(d1)
+
+    pdf.groupby('group').agg({'Word': list, 'Frequency':'sum'})
+    #                       Word  Frequency
+    #group                                 
+    #0      [mom, mother, mummy]        332
+    #1             [father, dad]         27
+    #2                    [2020]        151
+    #3                     [the]        124
+    #4                      [19]         82
+    #5                  [London]          6
+    #6                    [life]          6
+    #7               [something]          6
+    #8                    [None]         12
+    #9              [sdfsdgdfgh]          1
+
