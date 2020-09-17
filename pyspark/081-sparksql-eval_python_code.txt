@@ -37,66 +37,89 @@ Example-2: eval Python-formula and use the variable-value map saved in another d
   
   Code:
 
-    df = spark.createDataFrame([(1,"(a/(b+c))*100"),(2,"m/n*100"),(3,"d")],["ID", "Formula"])
+  Method-1: if df_val is not big and can be loaded into a Python dict:
+    assume: (1) variable names contain only alphanumeric and underscore (valid Python variable names)
+            (2) all functions used are builtin functions which don't require `import` from a module
+               for example +, -, *, /, %, max, min etc
+
+    from pyspark.sql.functions import udf
+
+    df = spark.createDataFrame([
+        (1,"(a/(b+c_12))*100"),(2,"m/n*100"),(3,"d"),(4,"max([a,b,12])"),(5,"a>b")
+    ],["ID", "Formula"])
 
     df_val = spark.createDataFrame([("a",4),("b",3),("c",8),("d",7),("m",2),("n",5)],["ID", "Value"])
-
- Method-1: if df_val is not big and can be loaded into a Python dict:
-
-    from pyspark.sql.functions import udf, create_map, lit
 
     map1 = df_val.rdd.collectAsMap()
 
     @udf("string")
     def eval_formula_1(f):
       try:
-        return eval(re.sub(r'\w+', lambda m: str(map1.get(m.group(0),m.group(0))), f))
-      except:
-        return None
+        return eval(f, map1)
+      except Exception as e:
+        return str(e)
 
-    df.select("*", eval_formula_1('Formula').astype('decimal(10,2)').alias('result')).show()
-    +---+-------------+------+
-    | ID|      Formula|result|
-    +---+-------------+------+
-    |  1|(a/(b+c))*100| 36.36|
-    |  2|      m/n*100| 40.00|
-    |  3|            d|  7.00|
-    +---+-------------+------+
+    df.select("*", eval_formula_1('Formula').alias('result')).show()
+    +---+----------------+-----------------+
+    | ID|         Formula|           result|
+    +---+----------------+-----------------+
+    |  1|(a/(b+c_12))*100|36.36363636363637|
+    |  2|         m/n*100|             40.0|
+    |  3|               d|                7|
+    |  4|   max([a,b,12])|               12|
+    |  5|             a>b|             true|
+    +---+----------------+-----------------+
 
 
- Method-2: if df_val is huge and not easy to handle in a single dict:
-    
+  Method-2: if df_val is huge and not easy to handle in a single dict:
+            external functions require module import, for example: sin(), date_add(), pi etc
+
+    df = spark.createDataFrame([
+       (1,"(a/(b+c_12))*100"),(2,"m/n*100"),(3,"d"),(4,"max([a,b,12])"),(5,"a>b"), 
+       (6,"2*sin(pi/2)"), (7, "date_add(h,2)")
+    ],["ID", "Formula"])
+
+    df_val = spark.createDataFrame([("a","4"),("b","3"),("c_12","8"),("d","7"),("m","2"),("n","5"),("h","2020-09-01")], ["ID", "Value"])
+
   Step-1: tokenize Formula (removed all non-words), create an array `vars`
 
     # if only alphanum are allowed
-    df1 = df.selectExpr("*", "flatten(sentences(Formula)) as vars")
-    +---+-------------+--------------+
-    | ID|      Formula|          vals|
-    +---+-------------+--------------+
-    |  1|(a/(b+c))*100|[a, b, c, 100]|
-    |  2|      m/n*100|   [m, n, 100]|
-    |  3|            d|           [d]|
-    +---+-------------+--------------+
+    df1 = df.selectExpr("*", "filter(split(Formula,'\\\W+'), x -> nullif(x,'') is not NULL) as vars")
+    +---+----------------+-----------------+
+    |ID |Formula         |vars             |
+    +---+----------------+-----------------+
+    |1  |(a/(b+c_12))*100|[a, b, c_12, 100]|
+    |2  |m/n*100         |[m, n, 100]      |
+    |3  |d               |[d]              |
+    |4  |max([a,b,12])   |[max, a, b, 12]  |
+    |5  |a>b             |[a, b]           |
+    |6  |2*sin(pi/2)     |[2, sin, pi, 2]  |
+    |7  |date_add(h,2)   |[date_add, h, 2] |
+    +---+----------------+-----------------+
 
-    # if underscore is allowed
-    #df1 = df.selectExpr("*", "filter(split(Formula,'\\\W+'), x -> nullif(x,'') is not NULL) as vars")
+    # if underscore is not allowed
+    #df1 = df.selectExpr("*", "flatten(sentences(Formula)) as vars")
 
   Step-2: left-join df1 and df2 using array_contains and then for each ID find all associated vars/Value
           and save them into a Map: map1
 
-    df2 = df1.join(df_val.withColumnRenamed("ID", "var"), expr("array_contains(vars, var)"), "left") \
-        .groupby("ID") \
+    df2 = (df1.join(df_val.withColumnRenamed("ID", "var"), expr("array_contains(vars, var)"), "left") 
+        .groupby("ID") 
         .agg(
           expr('first(Formula) as Formula'), 
-          expr('map_from_entries(collect_list((var, string(Value)))) as map1')
-        )
-    +---+-------------+------------------------+                                    
-    |ID |Formula      |map1                    |
-    +---+-------------+------------------------+
-    |1  |(a/(b+c))*100|[a -> 4, b -> 3, c -> 8]|
-    |3  |d            |[d -> 7]                |
-    |2  |m/n*100      |[m -> 2, n -> 5]        |
-    +---+-------------+------------------------+
+          expr('map_from_entries(collect_list(nvl2(var,(var, string(Value)),null))) as map1')
+        ))
+    +---+----------------+---------------------------+
+    |ID |Formula         |map1                       |
+    +---+----------------+---------------------------+
+    |7  |date_add(h,2)   |[h -> 2020-09-01]          |
+    |6  |2*sin(pi/2)     |[]                         |
+    |5  |a>b             |[a -> 4, b -> 3]           |
+    |1  |(a/(b+c_12))*100|[a -> 4, b -> 3, c_12 -> 8]|
+    |3  |d               |[d -> 7]                   |
+    |2  |m/n*100         |[m -> 2, n -> 5]           |
+    |4  |max([a,b,12])   |[a -> 4, b -> 3]           |
+    +---+----------------+---------------------------+
 
   Step-3: create udf to eval Formula using the map1 var->Value dict
 
@@ -105,18 +128,34 @@ Example-2: eval Python-formula and use the variable-value map saved in another d
     
     @udf("string")
     def eval_formula_2(f, d): 
+      from math import sin, pi
+      from datetime import datetime, timedelta
+      date_add = lambda x,y: (datetime.fromisoformat(x) + timedelta(days=y)).strftime("%Y-%m-%d")
       try:
-        return eval(re.sub(r'\w+', lambda m:  str(d.get(m.group(0),m.group(0))), f))
-      except:
-        return None
+        return str(eval(re.sub(r'\w+', lambda m: str(d.get(m.group(0),m.group(0))), f)))
+      except Exception as e:
+        return str(e)
 
-    df2.withColumn('result', eval_formula_2('Formula', 'map1').astype('decimal(10,2)')).show(truncate=False)
-    +---+-------------+------------------------+------+                             
-    |ID |Formula      |map1                    |result|
-    +---+-------------+------------------------+------+
-    |1  |(a/(b+c))*100|[a -> 4, b -> 3, c -> 8]|36.36 |
-    |3  |d            |[d -> 7]                |7.00  |
-    |2  |m/n*100      |[m -> 2, n -> 5]        |40.00 |
-    +---+-------------+------------------------+------+
+    df2.withColumn('result', eval_formula_2('Formula', 'map1')).show(truncate=False)
+    +---+----------------+---------------------------+-----------------+            
+    |ID |Formula         |map1                       |result           |
+    +---+----------------+---------------------------+-----------------+
+    |7  |date_add('h',2) |[h -> 2020-09-01]          |2020-09-03       |
+    |6  |2*sin(pi/2)     |[]                         |2.0              |
+    |5  |a>b             |[a -> 4, b -> 3]           |True             |
+    |1  |(a/(b+c_12))*100|[a -> 4, b -> 3, c_12 -> 8]|36.36363636363637|
+    |3  |d               |[d -> 7]                   |7                |
+    |2  |m/n*100         |[m -> 2, n -> 5]           |40.0             |
+    |4  |max([a,b,12])   |[a -> 4, b -> 3]           |12               |
+    +---+----------------+---------------------------+-----------------+
+
+   Notes:
+    (1) imported function sin(), constant `pi` and defined function: date_add() must be added inside the udf function
+        importing/defining from the main program will yield NameError
+    (2) make sure the data type returned matches the udf return schema
+
+  Method-3: use pandas_udf, see the below link Example-13
+    https://github.com/jiaxicheng/bigdata/blob/master/pyspark/notes/n079-pandas_udf-4.txt    
+
 
 
