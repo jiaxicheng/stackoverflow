@@ -330,6 +330,8 @@ Example-5: groupby synonyms and sum the frequency
     from functools import reduce
     import networkx as nx
 
+  Step-1: set up words column using PyDictionary
+
     def _get_synonyms(word):
       try:
         return PyDictionary(word).getSynonyms()[0].get(word)
@@ -337,6 +339,8 @@ Example-5: groupby synonyms and sum the frequency
         return None
 
     pdf['words'] = [*map(_get_synonyms, pdf['Word'])]
+
+  Step-2: setup edges and Greph
 
     # notice dropna() is important, or None will be added into edges
     edges = pdf[["Word"]].dropna() \
@@ -354,6 +358,9 @@ Example-5: groupby synonyms and sum the frequency
     #7     dad  father
 
     G = nx.from_pandas_edgelist(edges)
+
+  Step-3: find connected components and merge them with words which are not counted in, find 
+          the group-label and then do aggregation
 
     connected = [* nx.connected_components(G) ]
     #[{'mom', 'mother', 'mummy'}, {'dad', 'father'}]
@@ -391,4 +398,51 @@ Example-5: groupby synonyms and sum the frequency
     #7               [something]          6
     #8                    [None]         12
     #9              [sdfsdgdfgh]          1
+
+
+ Method-3: use a pretrained word2vec model
+   # refer to @mujjiga@stackoverflow 
+  
+  Step-1: calculate words from a pretrained model: word2vec-google-news-300
+
+    def _get_synonyms(words:list, threshold:float=0.7) -> list:
+      # get all words that can find an entry from model.get_vector()
+      import gensim.downloader as api
+      vectors = {}
+      model = api.load('word2vec-google-news-300')
+      for w in words: 
+        try: vectors[w] = model.get_vector(w)
+        except: pass
+    
+      W = []
+      vector_keys = list(vectors.keys()) 
+      vector_values = [ vectors[k] for k in vector_keys ] 
+      for i,word in enumerate(words): 
+        if word in vector_keys: 
+          try: 
+            W.append([ vector_keys[j] for j,cs in enumerate(model.cosine_similarities(vectors[word], vector_values)) 
+                if cs > threshold and vector_keys[j] != word ]) 
+          except Exception as e: 
+            W.append(str(e)) 
+        else: 
+          W.append(None)
+      return W
+    
+    pdf["words"] = _get_synonyms(pdf['Word'], 0.7)
+    #          Word  Frequency          words
+    #0          mom        250  [mother, dad]
+    #1         2020        151           None
+    #2          the        124             []
+    #3           19         82           None
+    #4       mother         81  [mom, father]
+    #5       London          6             []
+    #6         life          6             []
+    #7    something          6             []
+    #8       father         12  [mother, dad]
+    #9        mummy          1             []
+    #10         dad         15  [mom, father]
+    #11        None         12           None
+    #12  sdfsdgdfgh          1           None
+
+  Step-2 and Step-3 follow the same as Method-2
 
