@@ -185,15 +185,9 @@ Example-5: groupby synonyms and sum the frequency
 
   Step-1: use PyDictionary(e).getSynonyms()[0][e] to find all synonyms of word `e` into ArrayType column `words`
 
-    def _get_synonyms(word):
-      try:
-        return PyDictionary(word).getSynonyms()[0].get(word)
-      except:
-        return None
-
     @pandas_udf("array<string>") 
-    def get_synonyms(s: Series) -> Series: 
-      return Series([*map(_get_synonyms, s)])
+    def get_synonyms(s: Series) -> Series:
+      return Series(PyDictionary(s.fillna('').tolist()).getSynonyms(False))
 
     df1 = df.withColumn('words', get_synonyms('Word'))
 
@@ -310,16 +304,23 @@ Example-5: groupby synonyms and sum the frequency
        or fillna('___') before processing and then replace it back to None
    (3) Another way retriving related words based on `Life is complex`@stackoverflow
 
+        from PyDictionary import PyDictionary
         from nltk.corpus import wordnet
+        from pandas import Series
 
-        def _get_synonyms_1(word):
-          return list(set(x for e in wordnet.synsets(word) for x in e.lemma_names())) if word else None
+        def get_synonyms_nltk(words:Series) -> Series:
+          def _get_synonyms(word):
+            return list(set(x for e in wordnet.synsets(word) for x in e.lemma_names())) if word else None
+          return Series([*map(_get_synonyms, words)])
 
-        test nltk.corpus.wordnet: _get_synonyms_1('mother')
+        #test nltk.corpus.wordnet: get_synonyms_nltk('mother')
         # ['get', 'mother', 'overprotect', 'engender', 'generate', 'bring_forth', 
         #  'female_parent', 'sire', 'fuss', 'beget', 'father']
 
-        test PyDictionary/getSynonyms: _get_synonyms('mother') 
+        def get_synonyms_pydict(words:Series) -> Series:
+          return Series(PyDictionary(words.fillna('').tolist()).getSynonyms(False))
+
+        #test PyDictionary/getSynonyms: get_synonyms_pydict('mother') 
         # ['mother-in-law', 'female parent', 'supermom', 'mum', 'parent', 'mom', 'momma', 'para I',
         #  'mama', 'mummy', 'quadripara', 'mommy', 'quintipara', 'ma', 'puerpera', 'surrogate mother',
         #  'mater', 'primipara', 'mammy', 'mamma']
@@ -327,18 +328,17 @@ Example-5: groupby synonyms and sum the frequency
 
  Method-2: Use Pandas + networkx: 
 
-    from functools import reduce
+    from PyDictionary import PyDictionary
     import networkx as nx
+    from functools import reduce
+    from pandas import Series
 
   Step-1: set up words column using PyDictionary
 
-    def _get_synonyms(word):
-      try:
-        return PyDictionary(word).getSynonyms()[0].get(word)
-      except:
-        return None
+    def get_synonyms_pydict(s: Series) -> Series:
+      return Series(PyDictionary(s.fillna('').tolist()).getSynonyms(False))
 
-    pdf['words'] = [*map(_get_synonyms, pdf['Word'])]
+    pdf['words'] = get_synonyms_pydict(pdf['Word'])
 
   Step-2: setup edges and Greph
 
@@ -362,7 +362,7 @@ Example-5: groupby synonyms and sum the frequency
   Step-3: find connected components and merge them with words which are not counted in, find 
           the group-label and then do aggregation
 
-    connected = [* nx.connected_components(G) ]
+    connected = [ *nx.connected_components(G) ]
     #[{'mom', 'mother', 'mummy'}, {'dad', 'father'}]
 
     checked = reduce(lambda x,y: x|y, connected)
@@ -405,7 +405,7 @@ Example-5: groupby synonyms and sum the frequency
   
   Step-1: calculate words from a pretrained model: word2vec-google-news-300
 
-    def _get_synonyms(words:list, threshold:float=0.7) -> list:
+    def get_synonyms_google(words:list, threshold:float=0.7) -> list:
       # get all words that can find an entry from model.get_vector()
       import gensim.downloader as api
       vectors = {}
@@ -428,7 +428,7 @@ Example-5: groupby synonyms and sum the frequency
           W.append(None)
       return W
     
-    pdf["words"] = _get_synonyms(pdf['Word'], 0.7)
+    pdf["words"] = get_synonyms_google(pdf['Word'], 0.7)
     #          Word  Frequency          words
     #0          mom        250  [mother, dad]
     #1         2020        151           None
