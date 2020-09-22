@@ -85,6 +85,7 @@ Example-2: create map using SQL syntax and map_from_entries + transform
     
     sets = [set1, set2, set3, set4, set5]
     
+    # be caution if any elements in sets contain single quotes.
     map1 = f"""map({','.join(f"'{e}', {i}" for i,s in enumerate(sets) for e in s)})"""
     # "map('a1', 0,'a2', 0,'a3', 0,'a4', 0,'a5', 0,'b1', 1,'b2', 1,'b3', 1,'b4', 1,'b5', 1,'c1', 2
     # ,'c2', 2,'c3', 2,'c4', 2,'c5', 2,'d1', 3,'d2', 3,'d3', 3,'d4', 3,'d5', 3,'e1', 4,'e2', 4
@@ -108,8 +109,16 @@ Example-2: create map using SQL syntax and map_from_entries + transform
 Example-3: create a map with array of string as values:
   REF: https://stackoverflow.com/questions/63788176
   Task: set a new column with true/false if brand + type combo is shown in a list.
+  Method: use create_map and list comprehension to create a map<string,array<string>>
+          then do arrays_overlap
 
-  Method-1: use create_map and list comprehension to create a map<string,array<string>>
+    df = spark.createDataFrame([
+      ["Apple",['iPhone EE','iPhone 11', 'iPhone 11 Pro']],   
+      ["Acer",['Iconia Talk S','liquid Z6 Plus']],   
+      ["Casio",['Casio G\'zOne Brigade']],
+      ["Alcatel",[]]
+    ]).toDF("brand","type")
+
 
     from pyspark.sql.functions import arrays_overlap, array, lit, col, create_map
     
@@ -119,7 +128,8 @@ Example-3: create a map with array of string as values:
              'Apple': ['iPhone EE', 'iPhone 11 Pro', 'iPhone XS']}
 
     # create a map<string,array<string>> with brand as key and array of types as value
-    map1 = create_map([ t for k,v in dict1.items() for t in [lit(k), array(*[lit(e) for e in v])] ])
+    map1 = create_map([ t for k,v in dict1.items() for t in [lit(k), array(*map(lit,v)] ])
+    #Column<b"map(Casio, array(Casio G'zOne Ravine), Alcatel, array(3L), Acer, array(Acer Predator 8, liquid Z6 Plus), Apple, array(iPhone EE, iPhone 11 Pro, iPhone XS))">
 
     df.withColumn('Match', arrays_overlap('type', map1[col('brand')])).show(5,0)
     +-------+-------------------------------------+-----+
@@ -131,8 +141,63 @@ Example-3: create a map with array of string as values:
     |Alcatel|[]                                   |false|
     +-------+-------------------------------------+-----+
 
+  Note: if None (or NULL) is allowed in the list of types, arrays_overlap might return NULL, in such case, add 
+        `coalesce(arrays_overlap(a1,a2), lit(False))`, or use `size(array_intersect(a1,a2)) > 0` to replace 
+        `arrays_overlap(a1,a2)`
 
-    Note: if None (or NULL) is allowed in the list of types, arrays_overlap might return NULL, in such case
-     add `coalesce(arrays_overlap(...), false)`, or use `size(array_intersect()) > 0` to replace arrays_overlap()
+
+
+Example-4: convert K, M, G into corresponding numbers
+  REF: https://stackoverflow.com/questions/64003713
+
+    from pyspark.sql.functions import translate, coalesce, lit, substring, expr
+
+    df = spark.createDataFrame([(e,) for e in ["3M", "2K", "4500", ".12M"]],["col1"])
+
+    unit_map = expr("map('K',1000, 'M',1000000, 'G', 1000000000)")
+
+    df_new = df.withColumn('col2', translate('col1', 'KMG', '') * coalesce(unit_map[substring('col1',-1,1)],lit(1)))
+    df_new.show()
+    +----+---------+
+    |col1|     col2|
+    +----+---------+
+    |  3M|3000000.0|
+    |  2K|   2000.0|
+    |4500|   4500.0|
+    |.12M| 120000.0|
+    +----+---------+
+
+
+Example-5: use map + array, notice that in DSL mode, both array indices and map keys can be setup with a Column type. 
+  REF: https://stackoverflow.com/questions/63966039
+
+    from pyspark.sql.functions import create_map, array, col, lit
+
+    df = spark.createDataFrame([
+      (123,"A","3312019"),(123,"B","3312019"),(123,"A","12312019"),(123, "B", "12312019"),
+      (123,"B","5302020"), (123,"D","5302020")
+    ],['ID', 'Category', 'Date']) 
+
+    df2_1 = spark.createDataFrame([
+      (123,"3312019",40,60,None,None),(123,"12312019",20,None,None,None),(123,"5302020",30,10,None,None)
+    ], schema='ID int, Date string, A int, B int, C int, D int')
+
+    cols = ["A", "B", "C", "D"]
+    map1 = create_map([lit(e) for i,x in enumerate(cols) for e in [x, i]])
+
+    df_new = df.join(df2_1.select("ID", "Date", array(cols).alias("arr")), ["ID","Date"], "left") \
+        .select(*df.columns, col('arr')[map1[col("Category")]].alias("Points1"))
+        
+    df_new.show()
+    +---+--------+--------+-------+                                                 
+    | ID|Category|    Date|Points1|
+    +---+--------+--------+-------+
+    |123|       A|12312019|     20|
+    |123|       B|12312019|   null|
+    |123|       B| 5302020|     10|
+    |123|       D| 5302020|   null|
+    |123|       A| 3312019|     40|
+    |123|       B| 3312019|     60|
+    +---+--------+--------+-------+
 
 
