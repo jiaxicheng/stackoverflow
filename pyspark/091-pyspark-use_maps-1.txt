@@ -154,9 +154,9 @@ Example-4: convert K, M, G into corresponding numbers
 
     df = spark.createDataFrame([(e,) for e in ["3M", "2K", "4500", ".12M"]],["col1"])
 
-    unit_map = expr("map('K',1000, 'M',1000000, 'G', 1000000000)")
+    scale_map = expr("map('K',1000, 'M',1000000, 'G', 1000000000)")
 
-    df_new = df.withColumn('col2', translate('col1', 'KMG', '') * coalesce(unit_map[substring('col1',-1,1)],lit(1)))
+    df_new = df.withColumn('col2', translate('col1', 'KMG', '') * coalesce(scale_map[substring('col1',-1,1)],lit(1)))
     df_new.show()
     +----+---------+
     |col1|     col2|
@@ -166,6 +166,42 @@ Example-4: convert K, M, G into corresponding numbers
     |4500|   4500.0|
     |.12M| 120000.0|
     +----+---------+
+
+Example-4.2: same as example-4
+  REF: https://stackoverflow.com/questions/64039632
+
+    from pyspark.sql.functions import translate, coalesce, lit, substring, expr
+
+    df = spark.createDataFrame([
+          ('132K', '224.4M', '11160K', '0', '224.4M', '11160K', '0K') 
+        , ('134M', '224.9K', '12260K', '0', '224.4M', '11160K', '0K') 
+        , ('132K', '225.5M', '11160K', '0', '224.4M', '11160K', '0K') 
+    ], ['MINFLT', 'MAJFLT', 'VSTEXT', 'VSIZE', 'RSIZE', 'VGROW', 'RGROW']) 
+    +------+------+------+-----+------+------+-----+
+    |MINFLT|MAJFLT|VSTEXT|VSIZE| RSIZE| VGROW|RGROW|
+    +------+------+------+-----+------+------+-----+
+    |  132K|224.4M|11160K|    0|224.4M|11160K|   0K|
+    |  134M|224.9K|12260K|    0|224.4M|11160K|   0K|
+    |  132K|225.5M|11160K|    0|224.4M|11160K|   0K|
+    +------+------+------+-----+------+------+-----+
+
+    scale_map = expr("map('K',1000, 'M',1000000, 'G', 1000000000)")
+
+    cols_included = {'MAJFLT', 'RSIZE'}
+
+    df_new = df.select([ 
+      (translate(c, 'KMG', '')*coalesce(scale_map[substring(c,-1,1)],lit(1))).astype('bigint').alias(c) 
+        if c in cols_included else c for c in df.columns ])
+
+    df_new.show()
+    +------+---------+------+-----+---------+------+-----+
+    |MINFLT|   MAJFLT|VSTEXT|VSIZE|    RSIZE| VGROW|RGROW|
+    +------+---------+------+-----+---------+------+-----+
+    |  132K|224400000|11160K|    0|224400000|11160K|   0K|
+    |  134M|   224900|12260K|    0|224400000|11160K|   0K|
+    |  132K|225500000|11160K|    0|224400000|11160K|   0K|
+    +------+---------+------+-----+---------+------+-----+
+
 
 
 Example-5: use map + array, notice that in DSL mode, both array indices and map keys can be setup with a Column type. 
@@ -184,6 +220,7 @@ Example-5: use map + array, notice that in DSL mode, both array indices and map 
 
     cols = ["A", "B", "C", "D"]
     map1 = create_map([lit(e) for i,x in enumerate(cols) for e in [x, i]])
+    +---+--------+----------+
 
     df_new = df.join(df2_1.select("ID", "Date", array(cols).alias("arr")), ["ID","Date"], "left") \
         .select(*df.columns, col('arr')[map1[col("Category")]].alias("Points1"))
