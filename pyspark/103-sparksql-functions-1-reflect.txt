@@ -1,0 +1,74 @@
+reflect     : https://spark.apache.org/docs/latest/api/sql/index.html#reflect
+java_method : https://spark.apache.org/docs/latest/api/sql/index.html#java_method
+
+> reflect(class, method[, arg1[, arg2 ..]]) - Calls a method with reflection.
+
+> java_method(class, method[, arg1[, arg2 ..]]) - Calls a method with reflection.
+
+works with methods of objects or static functions
+
+Note: reflect/java_method is a wrapper of Java-based UDF, mostly useful for PySpark.
+
+---
+Example-1: call java.net.URLDecoder.decode(String s, String enc) from SQL
+
+    df = spark.createDataFrame([
+        (e,) for e in ["ThisIs%201rstString", "This%20is%3Ethisone", "and%20so%20one"]], ["mystring"]
+    )
+
+    df.selectExpr("*", "reflect('java.net.URLDecoder','decode', mystring, 'utf-8') as newcol").show()
+    +-------------------+-----------------+
+    |           mystring|           newcol|
+    +-------------------+-----------------+
+    |ThisIs%201rstString|ThisIs 1rstString|
+    |This%20is%3Ethisone|  This is>thisone|
+    |     and%20so%20one|       and so one|
+    +-------------------+-----------------+
+
+  See also: java.net.URLEncoder.encode(String s, String enc)
+
+  reference: https://docs.oracle.com/javase/7/docs/api/java/nio/charset/Charset.html
+
+
+Example-1.2: split request_uri into MapType columns with all params:
+  REF: https://stackoverflow.com/questions/63878059
+  Method: 
+  1. use substring_index to split params from the request_uri
+  2. use reflect and java.net.URLDecoder.decode to unescape URI
+  3. use str_to_map to split the result from `2` into Map
+
+ Scala code:
+
+    val df = Seq(
+       "/i?aid=fptplay&ast=1582163970763&av=4.6.1&did=83295772a8fee349",
+       "/i?p=fplay-ottbox-2019&av=2.0.18&nt=wifi&ov=9&tv=1.0.0&tz=GMT%2B07%3A00"
+    ).toDF("request_uri")
+
+    df.selectExpr("""
+      str_to_map(reflect('java.net.URLDecoder','decode', substring_index(request_uri,'?',-1), 'utf-8'),'&','=') as map1
+    """).show(false)
+    +-----------------------------------------------------------------------------------------+
+    |map1                                                                                     |
+    +-----------------------------------------------------------------------------------------+
+    |[aid -> fptplay, ast -> 1582163970763, av -> 4.6.1, did -> 83295772a8fee349]             |
+    |[p -> fplay-ottbox-2019, av -> 2.0.18, nt -> wifi, ov -> 9, tv -> 1.0.0, tz -> GMT+07:00]|
+    +-----------------------------------------------------------------------------------------+
+
+
+Example-2: misc:
+
+    spark.sql("select reflect('org.apache.commons.codec.digest.DigestUtils', 'sha256Hex', 'message') as msg") \
+    .show(truncate=False)
+    +----------------------------------------------------------------+
+    |msg                                                             |
+    +----------------------------------------------------------------+
+    |ab530a13e45914982b79f9b7e3fba994cfd1f3fb22f71cea1afbf02b460c6d1d|
+    +----------------------------------------------------------------+
+
+
+
+Potential Others:
+  https://docs.oracle.com/javase/8/docs/api/java/lang/String.html
+  https://docs.oracle.com/javase/8/docs/api/java/lang/Math.html
+  https://commons.apache.org/proper/commons-codec/apidocs/org/apache/commons/codec/digest/DigestUtils.html
+
