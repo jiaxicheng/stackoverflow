@@ -1,0 +1,74 @@
+Notes on handling NULLs with Spark SQL:
+
+---
+Target: return a array of strings exclude NULL items:
+Methods:
+
+ * Row-wise(on the same row):
+
+   (1) array + filter:
+     
+       cols_list = ",".join(f"`{c}`" for c in cols)
+       df1 = df.selectExpr(f"filter(array({cols_list}), c -> c is not NULL) as dta")
+
+   (2) concat_ws/array_join + split:
+
+       cols_list = ",".join(f"`{c}`" for c in cols)
+       df1 = df.selectExpr(f"split(concat_ws('\0', {cols_list}), '\0') as dta")
+     or
+       df1 = df.selectExpr(f"split(array_join(array({cols_list}), '\0'), '\0') as dta")
+
+     Note: 
+      (1) caveat: when all values of cols are NULL, concat_ws/array_join will return EMPTY instead of NULL
+          size of resulting array `[]` are both `1`, the size is `0` when using either `flatten` or `filter`
+      (2) with Spark 3.0+, array_join support the 3rd argument to specify nullReplacement
+
+   (3) flatten + array + nvl2: 
+
+       items_list = ','.join(f'nvl2(`{c}`,array(`{c}`),array())' for c in cols)
+       df1 = df.selectExpr(f"flatten(array({items_list})) as dta")
+
+
+ * Column-wise(on the same column):
+
+   (1) use collect_list on aggregate to collect non-NULL items on the same column:
+
+       df.groupby('col1').agg(collect_list(col).alias('dta'))
+
+   (2) flatten: to discard all empty arrays `array()` in an existing array of arrays column
+
+
+Spark SQL functions to handle NULL:
+---
+(1) nullif(expr1, expr2): return null if expr1 equals to expr2, or expr1 otherwise (spark 2.0.0)
+  + ffill/bfill an non-null value
+
+      # do ffill on value==-1
+      last(expr("nullif(col,-1)"), True).over(w1)
+
+  + coalesce an non-null value  
+
+      # set the first desc to be not NULL and EMPTY 
+      coalesce(nullif(t1.desc,''), nullif(t2.desc,''), nullif(t3.desc,''))
+      
+
+(2) ifnull(expr1, expr2): return expr2 if expr1 is null, or expr1 otherwise (spark 2.0.0)
+       nvl(expr1, expr2): return expr2 if expr1 is null, or expr1 otherwise (spark 2.0.0)
+     nanvl(expr1, expr2): return expr1 if it's not NaN, or expr2 otherwise (spark 1.5.0)
+  coalesce(expr1, expr2, ...) return the first non-null values rom argument
+  
+
+
+(3) nvl2(expr1, expr2, expr3): return expr2 if expr1 is not null, or expr3 otherwise (spark 2.0.0)
+
+  + if `col` is not NULL then array(`col`), otherwise array()
+
+      nvl2(`col`, array(`col`), array())
+
+
+(4) isnan, isnull, isnotnull
+
+
+
+
+
