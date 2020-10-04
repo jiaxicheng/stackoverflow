@@ -1,0 +1,50 @@
+nvl2:
+
+> nvl2(expr1, expr2, expr3) - Returns expr2 if expr1 is not null, or expr3 otherwise.
+
+
+---
+Example-1: save column names which have non-NULL values and save as ArrayType column:
+  REF: https://stackoverflow.com/questions/63702173/using-pyspark-to-create-a-segment-array-from-a-flat-record
+
+    from pyspark.sql.functions import concat_ws, expr, coalesce, split, lit, col
+
+    df = spark.createDataFrame([
+        (100, 'M', None, 25, None, 30),
+        (200, None, None, 43, None, 250), 
+        (300, 'F', 3000, None, 74, None)
+    ], ['user_id', 'seg1', 'seg2', 'seg3', 'seg4', 'seg5'])
+
+  cols = df.columns[1:]
+
+  Method-1: use concat_ws + split
+
+    df.select(
+        "user_id", 
+        split(concat_ws('_', *[expr(f"nvl2(`{c}`,'{c}',NULL)") for c in cols]),'_').alias('segment_array')
+    ).show()
+    +-------+------------------+
+    |user_id|     segment_array|
+    +-------+------------------+
+    |    100|[seg1, seg3, seg5]|
+    |    200|      [seg3, seg5]|
+    |    300|[seg1, seg2, seg4]|
+    +-------+------------------+
+
+  Method-2: use flatten + array
+
+    df.select(
+        "user_id",
+        flatten(array(*[expr(f"nvl2({c},array('{c}'),array())") for c in cols])).alias('segment_array')
+    ).show()
+
+
+  Method-3: use array + filter
+
+    df.selectExpr(
+        "user_id",
+        f"""filter(array({','.join(f"nvl2(`{c}`,'{c}',NULL)" for c in cols)}), x -> x is not NULL) as segment_array"""
+    ).show()
+
+
+
