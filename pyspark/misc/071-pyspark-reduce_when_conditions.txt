@@ -1,6 +1,9 @@
-https://stackoverflow.com/questions/57517381/how-do-i-use-multiple-conditions-with-pyspark-sql-funtions-when-from-a-dict
+Using functools.reduce to dynamically setting up condition:
 
-use **reduce()**:
+---
+Example-1: setting up multiple when/otherwise condition from a dict
+  REF: https://stackoverflow.com/questions/57517381
+  use **reduce()**:
 
     from pyspark.sql.functions import when, col
     from functools import reduce
@@ -33,6 +36,32 @@ use **reduce()**:
     |  3|       N|      N|          N|
     +---+--------+-------+-----------+
 
+  Other similar examples:
+    (1) how-to-dynamically-filter-out-rows-in-a-spark-dataframe-with-an-exact-match
+        https://stackoverflow.com/questions/58126939
+    (2) how-to-make-a-new-value-that-comes-from-a-value-of-column-plus-anot
+        https://stackoverflow.com/questions/58409089
 
-This is a very typical use cases, another example:
-https://stackoverflow.com/questions/58126939/how-to-dynamically-filter-out-rows-in-a-spark-dataframe-with-an-exact-match/
+
+Example-2: setting up a when-when-otherwise chain
+  REF: https://stackoverflow.com/q/64375061/9510729
+  Method: use `F` as the initial_value of the reduce function
+
+    from pyspark.sql import functions as F
+
+    category_rules = [('A', 8, 'small'), ('A', 30, 'large'), ('B', 5, 'small')]
+    data = [('A', '45345', 5), ('C', '55345', 5), ('A', '35345', 10), ('B', '65345', 4)]
+    df = spark.createDataFrame(data, ['group', 'id', 'size'])
+
+    set_cat = reduce(lambda d,x: d.when((F.col('group') == x[0])&(F.col('size') < x[1]),x[2]), category_rules, F)
+
+    df.withColumn('category', F.coalesce(set_cat,F.lit('unknown'))).show() 
+    +-----+-----+----+--------+
+    |group|   id|size|category|
+    +-----+-----+----+--------+
+    |    A|45345|   5|   small|
+    |    C|55345|   5| unknown|
+    |    A|35345|  10|   large|
+    |    B|65345|   4|   small|
+    +-----+-----+----+--------+
+
