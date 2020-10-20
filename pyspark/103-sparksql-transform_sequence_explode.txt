@@ -1,6 +1,14 @@
-https://stackoverflow.com/questions/58492974/duplicate-rows-according-to-a-condition-with-explode-and-array
+# Use sequence(start_T, end_T,[,step_T]): array<T>
+available Spark 2.4.0+
 
-For **Spark 2.4.0+**, you can use **[sequence][1]** + **[transform][2]** + explode to create new Rows with this task:
+Note: For temporal(of or relating to time) sequence, the default step_T is 1 day or -1 day:
+example: SELECT sequence(to_date('2018-01-01'), to_date('2018-03-01'), interval 1 month);
+
+
+---
+Example-1: duplicate-rows-according-to-a-condition-with-explode-and-array
+  REF: https://stackoverflow.com/questions/58492974
+  For **Spark 2.4.0+**, use **[sequence][1]** + **[transform][2]** + explode to create new Rows with this task:
 
     from pyspark.sql.functions import expr
 
@@ -33,15 +41,18 @@ For **Spark 2.4.0+**, you can use **[sequence][1]** + **[transform][2]** + explo
 
 **How it works:**
 
-1. convert *StartDate*, *EndDate* to DateType with the value to the last_day of the same month(*s_date*, *e_date*). if *EndDate* is NULL, then set its value to last_day of the previous month from the current_date
+  1. convert *StartDate*, *EndDate* to DateType with the value to the last_day of the same month(*s_date*, *e_date*). 
+     if *EndDate* is NULL, then set its value to last_day of the previous month from the current_date
 
-2. calculate *# of months* between the above two dates and then create a sequence(0, #months) and transform it into an array of months(`EndOfTheMonth`) between StartDate and EndDate (inclusively)
+  2. calculate *# of months* between the above two dates and then create a sequence(0, #months) and transform it 
+     into an array of months(`EndOfTheMonth`) between StartDate and EndDate (inclusively)
 
-3. use explode_outer to generate Rows for all months in the above array
+  3. use explode_outer to generate Rows for all months in the above array
 
-4. calculate the IsDeliveryOpen flag accordingly. I removed `StartDate <= EndOfTheMonth` in your code since it's always true based on how *EndOfTheMonth* is calculated.
+  4. calculate the IsDeliveryOpen flag accordingly. I removed `StartDate <= EndOfTheMonth` in your code since it's 
+     always true based on how *EndOfTheMonth* is calculated.
 
-**Note:** the above can also be written as one SQL statement:
+  **Note:** the above can also be written as one SQL statement:
 
     df.createOrReplaceTempView('t_df')
 
@@ -63,26 +74,26 @@ For **Spark 2.4.0+**, you can use **[sequence][1]** + **[transform][2]** + explo
 
     ''').show()
 
-#################################################
-More request to handle the same in weekly basis:
-#################################################
-"""
-Use date_trunc('WEEK', date_col) which truncate the date_col to the Monday of the same week.
-Use sequence(start_date, end_date, interval 7 days) to generate the sequence
-"""
+  #################################################
+  More request to handle the same in weekly basis:
+  #################################################
+  """
+  Use date_trunc('WEEK', date_col) which truncate the date_col to the Monday of the same week.
+  Use sequence(start_date, end_date, interval 7 days) to generate the sequence
+  """
 
-df_weekly = (df
+  df_weekly = (df
     .withColumn('s_date', expr("date(date_trunc('WEEK', to_date(StartDate, 'M/d/yyyy')))"))
     .withColumn('e_date', expr("date(date_trunc('WEEK', IFNULL(to_date(EndDate, 'M/d/yyyy'), date_sub(current_date(),7))))"))
     .withColumn('StartOfTheWeek', expr('explode_outer(sequence(s_date, e_date, interval 7 days))'))
     .withColumn('IsDeliveryOpen', expr("IF(e_date > StartOfTheWeek or EndDate is Null, 1, 0)"))
-)
+  )
 
 
-# Or in the Spark SQL syntax:
-df.createOrReplaceTempView('t_df')
+  # Or in the Spark SQL syntax:
+  df.createOrReplaceTempView('t_df')
 
-spark.sql('''
+  spark.sql('''
 
     WITH d AS (
         SELECT *
@@ -96,8 +107,97 @@ spark.sql('''
     FROM d
     LATERAL VIEW OUTER explode(sequence(s_date, e_date, interval 7 days)) w AS StartOfTheWeek
 
-''')
+  ''')
 
 
   [1]: https://spark.apache.org/docs/2.4.0/api/sql/index.html#sequence
   [2]: https://spark.apache.org/docs/2.4.0/api/sql/index.html#transform
+
+
+Example-2: 
+  REF: https://docs.databricks.com/_static/notebooks/apache-spark-2.4-functions.html
+    
+    df1 = spark.createDataFrame([
+            (1, '2019-01-01', '2019-01-07')
+          , (2, '2019-02-02', '2019-02-05')
+          , (3, '2019-03-03', '2019-03-15')
+        ], ['id', 'start_date', 'end_date']
+    )
+       # , schema='struct<id:int,start_date:date,end_date:date>'
+    
+    df_new = df1.withColumn('drange', F.explode(F.expr("sequence(to_date(start_date), to_date(end_date), interval 1 day)")))
+    
+    df_new.show(50)
+    +---+----------+----------+----------+
+    | id|start_date|  end_date|    drange|
+    +---+----------+----------+----------+
+    |  1|2019-01-01|2019-01-07|2019-01-01|
+    |  1|2019-01-01|2019-01-07|2019-01-02|
+    |  1|2019-01-01|2019-01-07|2019-01-03|
+    |  1|2019-01-01|2019-01-07|2019-01-04|
+    |  1|2019-01-01|2019-01-07|2019-01-05|
+    |  1|2019-01-01|2019-01-07|2019-01-06|
+    |  1|2019-01-01|2019-01-07|2019-01-07|
+    |  2|2019-02-02|2019-02-05|2019-02-02|
+    |  2|2019-02-02|2019-02-05|2019-02-03|
+    |  2|2019-02-02|2019-02-05|2019-02-04|
+    |  2|2019-02-02|2019-02-05|2019-02-05|
+    |  3|2019-03-03|2019-03-15|2019-03-03|
+    |  3|2019-03-03|2019-03-15|2019-03-04|
+    |  3|2019-03-03|2019-03-15|2019-03-05|
+    |  3|2019-03-03|2019-03-15|2019-03-06|
+    |  3|2019-03-03|2019-03-15|2019-03-07|
+    |  3|2019-03-03|2019-03-15|2019-03-08|
+    |  3|2019-03-03|2019-03-15|2019-03-09|
+    |  3|2019-03-03|2019-03-15|2019-03-10|
+    |  3|2019-03-03|2019-03-15|2019-03-11|
+    +---+----------+----------+----------+
+    
+  **WARNING**: 
+  + be cautuin using `Interval 1 month` with the sequence() function, it will not generate dates
+    for each month, instead, it's more like `interval 30 day`. To create a list of consecutive months
+    the approach might be the following:
+    (1) d = explode(sequence(start_date, end_date, interval 28 day))
+    (2) d = last_day(d)
+    (3) run drop_duplicates() on the dataframe
+
+ 
+
+Example-3: how-do-i-use-flatmap-with-multiple-columns-in-dataframe
+  REF: https://stackoverflow.com/questions/60068037
+  Method: Use sequence to generate an array of timestamps between starttime and endtime interval by 1 hours, 
+          and then transform it into a named_struct with interval calculated by each item (x below) of the 
+          above sequence
+
+    df.withColumn('dts', expr("""
+      transform(
+        /* create a sequence between the HOURS of starttime and endtime */
+        sequence(date_trunc("HOUR", starttime), date_trunc("HOUR", endtime), interval 1 hours),
+        /* iterate through each item `x` of sequence and convert it into a named_struct */
+        x -> named_struct(
+          /* starttime is the max between x and starttime */
+          'starttime', greatest(x, starttime), 
+          /* endtime is the min between x + 59min + 59sec and endtime */
+          'endtime', least(x + interval 59 minutes 59 seconds, endtime)
+        )
+      )
+    """)).selectExpr('Name', 'city', 'inline_outer(dts)').show()
+    +-----+------+-------------------+-------------------+
+    |Name |city  |starttime          |endtime            |
+    +-----+------+-------------------+-------------------+
+    |user1|London|2019-08-02 03:34:45|2019-08-02 03:52:03|
+    |user2|Boston|2019-08-13 13:34:10|2019-08-13 13:59:59|
+    |user2|Boston|2019-08-13 14:00:00|2019-08-13 14:59:59|
+    |user2|Boston|2019-08-13 15:00:00|2019-08-13 15:02:10|
+    +-----+------+-------------------+-------------------+
+
+  **Where:**
+  (1) `date_trunc("HOUR", starttime)`: truncate the column starttime to HOUR
+  (2) `sequence(start, end, interval 1 hours)`: create a sequence of timestamp between `start` and `end`, 
+      interval by 1 hours inclusively
+  (3) `transform(arr_col, x -> names_struct(..))`: iterate through each array item x in arr_col 
+      and transform it into a named_struct
+
+
+
+
