@@ -200,4 +200,36 @@ Example-3: how-do-i-use-flatmap-with-multiple-columns-in-dataframe
 
 
 
+Example-4: populate missing dates using sequence + transform + inline
+  REF: https://stackoverflow.com/questions/64466161
+  Method: using transform + sequence + inline functions
+
+    from pyspark.sql.functions import expr, lead
+    from pyspark.sql import Window
+
+    df = spark.createDataFrame([("2020-10-01",10),("2020-10-03",15),("2020-10-06",16)],["date", "value"])
+
+    w1 = Window.partitionBy().orderBy('date')
+
+    df.withColumn('date', expr("date(date)")) \
+        .withColumn('next_date', coalesce(date_add(lead('date').over(w1),-1),'date')) \
+        .selectExpr("""
+          inline(
+            transform(
+              sequence(date,next_date), 
+              (d,i) -> (d as date, if(i=0,value,NULL) as value)
+            )
+          )
+         """) \
+        .show()
+    +----------+-----+
+    |      date|value|
+    +----------+-----+
+    |2020-10-01|   10|
+    |2020-10-02| null|
+    |2020-10-03|   15|
+    |2020-10-04| null|
+    |2020-10-05| null|
+    |2020-10-06|   16|
+    +----------+-----+
 
