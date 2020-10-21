@@ -1,0 +1,107 @@
+Examples using pyspark.sql.GroupedData().pivot
+
+
+---
+Example-1: pivot with Months as columns
+  REF: https://stackoverflow.com/questions/59634932/issue-with-pyspark-dataframe-with-redundant-values
+  Method: Use groupby + pivot
+  ---
+  (1) pivot to use a list (customize order of columns)
+  (2) convert month from number to Str: `date_format(to_date(concat(2020,MONTH), 'yyyyMM'),'MMM')`
+
+    from pyspark.sql.functions import expr, first
+    from datetime import datetime
+
+    df = spark.createDataFrame([
+        ('Paax', 2019, 12, 'ERG2', '435911'), ('Paax', 2019, 11, 'ELE', '435911'),
+        ('Paax', 2019, 11, 'PHA', '435911'), ('Paax', 2019, 12, 'ELE', '435911'),
+        ('Paax', 2019, 12, 'EBM', '512518'), ('Paax', 2019, 12, 'PHA', '435911')
+    ], ['CLIENT_NAME', 'YEAR', 'MONTH', 'ENGINE', 'TOTAL_UNIQUE_MEMBER']) 
+
+    months = [ datetime(2019,m+1,1).strftime("%b").upper() for m in range(12) ]
+    #['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+
+    df_new = (df.withColumn('month', expr("upper(date_format(to_date(concat(2020,MONTH), 'yyyyMM'),'MMM'))"))
+        .withColumnRenamed('ENGINE', 'ANALYTIC')
+        .groupby('ANALYTIC')
+        .pivot('month', months)
+        .agg(first('TOTAL_UNIQUE_MEMBER'))
+        .fillna(''))
+
+    df_new.show()
+    +--------+---+---+---+---+---+---+---+---+---+---+------+------+                
+    |ANALYTIC|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|   NOV|   DEC|
+    +--------+---+---+---+---+---+---+---+---+---+---+------+------+
+    |     PHA|   |   |   |   |   |   |   |   |   |   |435911|435911|
+    |    ERG2|   |   |   |   |   |   |   |   |   |   |      |435911|
+    |     ELE|   |   |   |   |   |   |   |   |   |   |435911|435911|
+    |     EBM|   |   |   |   |   |   |   |   |   |   |      |512518|
+    +--------+---+---+---+---+---+---+---+---+---+---+------+------+
+
+
+
+Example-2: sum of array elements depending on the value condition
+  REF: https://stackoverflow.com/questions/59931770
+  MEthod: Use pivot, specify list of values to pivot, this is good for performance:
+
+    from pyspark.sql.functions import sum as fsum, expr
+
+    df = spark.createDataFrame([
+        (1,[0.2, 2.1, 3., 4., 3., 0.5]),
+        (2,[7., 0.3, 0.3, 8., 2.,]), 
+        (3,None), 
+        (4,[])
+      ],['id','column'])
+    df.show()
+    +---+--------------------+
+    | id|              column|
+    +---+--------------------+
+    |  1|[0.2, 2.1, 3.0, 4...|
+    |  2|[7.0, 0.3, 0.3, 8...|
+    |  3|                null|
+    |  4|                  []|
+    +---+--------------------+
+
+    df.selectExpr('id', 'explode_outer(column) as item') \
+      .withColumn('g', expr('if(item < 2, "column<2", if(item > 2, "column>2", "column=2"))')) \
+      .groupby('id') \
+      .pivot('g', ["column<2", "column>2", "column=2"]) \
+      .agg(fsum('item')) \
+      .show()
+    +---+--------+--------+--------+                                                
+    | id|column<2|column>2|column=2|
+    +---+--------+--------+--------+
+    |  1|     0.7|    12.1|    null|
+    |  3|    null|    null|    null|
+    |  2|     0.6|    15.0|     2.0|
+    |  4|    null|    null|    null|
+    +---+--------+--------+--------+
+
+
+Example-3: merge two columns before doing pivot:
+  REF: https://stackoverflow.com/questions/64353811/pivot-multiple-columns-from-row-to-column
+  Method: the pivot list are from concatenation of two columns, see below `p1` column
+
+    from pyspark.sql.functions import expr, first
+
+    df = spark.createDataFrame([
+        (2, 'two', 0, 'Hybrid', 58), (2, 'two', 1, 'Hybrid', 2), (5, 'five', 1, 'Excl', 13), 
+        (5, 'five', 0, 'Excl', 70), (5, 'five', 0, 'Agen', 811), (5, 'five', 1, 'Agen', 279),
+        (5, 'five', 1, 'Hybrid', 600), (5, 'five', 0, 'Hybrid', 2819)     
+    ], ['id', 'name', 'policy', 'payment_name', 'count'])
+
+    df.withColumn('p1', expr("concat_ws('_', IF(policy=0,'no',NULL),'policy',lower(payment_name))")) \
+        .groupby('id','name') \
+        .pivot('p1') \
+        .agg(first('count')) \
+        .fillna(0) \
+        .show()
+    +---+----+--------------+--------------+----------------+-----------+-----------+-------------+
+    | id|name|no_policy_agen|no_policy_excl|no_policy_hybrid|policy_agen|policy_excl|policy_hybrid|
+    +---+----+--------------+--------------+----------------+-----------+-----------+-------------+
+    |  2| two|             0|             0|              58|          0|          0|            2|
+    |  5|five|           811|            70|            2819|        279|         13|          600|
+    +---+----+--------------+--------------+----------------+-----------+-----------+-------------+
+
+
+
