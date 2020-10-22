@@ -7,6 +7,7 @@ Creates a map after splitting the text into key/value pairs using delimiters.
 (1) Default delimiters are ',' for pairDelim and ':' for keyValueDelim. 
 (2) Both pairDelim and keyValueDelim are treated as regular expressions.
 
+Note: this regex delims works even with Spark 1.6.0 (untested for the older Spark versions)
 
 ---
 Example-1: 
@@ -245,3 +246,30 @@ Code:
     |4  |anum: 123 mgr: 1234          |[anum -> 123, mgr -> 1234]          |
     +---+-----------------------------+------------------------------------+
 
+
+
+Example-8: extract values from String with specific patterns
+  REF: https://stackoverflow.com/questions/64473130
+  Method: using str_to_map to split String into key/value pairs and then retrieve values from desired keys:
+     for str_to_map, we have pairDelim=`> *` and keyValueDelim=`=<`
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([ 
+      ("Type=<Series VR> Model=<1Ac4> ID=<34> conn seq=<2>",),
+      ("Type=<SeriesX> Model=<12Q3> ID=<231> conn seq=<3423123>",)
+    ], ['value'])
+
+    keys = ['Type', 'Model', 'ID', 'conn seq']
+
+    df.selectExpr("str_to_map(value, '> *', '=<') as m") \
+        .select([ F.col('m')[k].alias(k) for k in keys ]) \
+        .show()
+    +---------+-----+---+--------+
+    |     Type|Model| ID|conn seq|
+    +---------+-----+---+--------+
+    |Series VR| 1Ac4| 34|       2|
+    |  SeriesX| 12Q3|231| 3423123|
+    +---------+-----+---+--------+
+
+  To find all keys in a MapType column: https://stackoverflow.com/a/40603522/9510729
