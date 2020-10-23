@@ -204,19 +204,20 @@ Example-4: populate missing dates using sequence + transform + inline
   REF: https://stackoverflow.com/questions/64466161
   Method: using transform + sequence + inline functions
 
-    from pyspark.sql.functions import expr, lead
+    from pyspark.sql.functions import expr, lead, date_add, coalesce
     from pyspark.sql import Window
 
     df = spark.createDataFrame([("2020-10-01",10),("2020-10-03",15),("2020-10-06",16)],["date", "value"])
 
+    # this is only a sample, real data have columns to set up partitionBy()
     w1 = Window.partitionBy().orderBy('date')
 
     df.withColumn('date', expr("date(date)")) \
-        .withColumn('next_date', coalesce(date_add(lead('date').over(w1),-1),'date')) \
+        .withColumn('end_date', coalesce(date_add(lead('date').over(w1),-1),'date')) \
         .selectExpr("""
           inline(
             transform(
-              sequence(date,next_date), 
+              sequence(date,end_date), 
               (d,i) -> (d as date, if(i=0,value,NULL) as value)
             )
           )
@@ -232,4 +233,72 @@ Example-4: populate missing dates using sequence + transform + inline
     |2020-10-05| null|
     |2020-10-06|   16|
     +----------+-----+
+
+
+Example-5: similar to the above Example-4, but fix missing months
+  REF: https://stackoverflow.com/q/64486068/9510729
+  Task: add missing dates and calculate N-day moving averages
+  Notes: add_months() + months_between() to iterate through months correctly. below `end_date` and `date` 
+         should be on the same day#, i.e. `01` the first day or the last_day(date)
+
+      sequence(0, int(months_between(end_date, date)))
+
+
+    from pyspark.sql import functions as F, Window
+
+    df = spark.createDataFrame([
+        ('A', 'pharma', '1/3/2019', 50), ('A', 'pharma', '1/4/2019', 60), ('A', 'pharma', '1/5/2019', 70), 
+        ('A', 'pharma', '1/8/2019', 80), ('A', 'ENT', '1/8/2019', 50), ('A', 'ENT', '1/9/2019', 65), 
+        ('A', 'ENT', '1/11/2019', 40) 
+    ], ['product', 'specialty', 'date', 'sales']) 
+
+    df = df.withColumn('date', F.to_date('date', 'd/M/yyyy'))
+
+    w1 = Window.partitionBy('product', 'specialty').orderBy('date')
+
+    df1 = df.withColumn('end_date', F.coalesce(F.add_months(F.lead('date').over(w1),-1),'date')) \
+        .selectExpr("product", "specialty", """
+            inline_outer(
+              transform(
+                sequence(0,int(months_between(end_date, date))),
+                i -> (add_months(date,i) as date, IF(i=0,sales,0) as sales)
+              )
+          )""")
+
+    df1.show()
+    +-------+---------+----------+-----+                                            
+    |product|specialty|      date|sales|
+    +-------+---------+----------+-----+
+    |      A|      ENT|2019-08-01|   50|
+    |      A|      ENT|2019-09-01|   65|
+    |      A|      ENT|2019-10-01|    0|
+    |      A|      ENT|2019-11-01|   40|
+    |      A|   pharma|2019-03-01|   50|
+    |      A|   pharma|2019-04-01|   60|
+    |      A|   pharma|2019-05-01|   70|
+    |      A|   pharma|2019-06-01|    0|
+    |      A|   pharma|2019-07-01|    0|
+    |      A|   pharma|2019-08-01|   80|
+    +-------+---------+----------+-----+
+
+    N = 3
+    
+    w2 = Window.partitionBy('product', 'specialty').orderBy('date').rowsBetween(-N+1,0)
+
+    df1.select("*", F.round(F.sum('sales').over(w2)/N,2).alias(f'{N}month_avg_sales')).show()
+    +-------+---------+----------+-----+----------------+                           
+    |product|specialty|      date|sales|3month_avg_sales|
+    +-------+---------+----------+-----+----------------+
+    |      A|      ENT|2019-08-01|   50|           16.67|
+    |      A|      ENT|2019-09-01|   65|           38.33|
+    |      A|      ENT|2019-10-01|    0|           38.33|
+    |      A|      ENT|2019-11-01|   40|            35.0|
+    |      A|   pharma|2019-03-01|   50|           16.67|
+    |      A|   pharma|2019-04-01|   60|           36.67|
+    |      A|   pharma|2019-05-01|   70|            60.0|
+    |      A|   pharma|2019-06-01|    0|           43.33|
+    |      A|   pharma|2019-07-01|    0|           23.33|
+    |      A|   pharma|2019-08-01|   80|           26.67|
+    +-------+---------+----------+-----+----------------+
+
 
