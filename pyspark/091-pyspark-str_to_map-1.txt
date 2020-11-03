@@ -272,4 +272,51 @@ Example-8: extract values from String with specific patterns
     |  SeriesX| 12Q3|231| 3423123|
     +---------+-----+---+--------+
 
-  To find all keys in a MapType column: https://stackoverflow.com/a/40603522/9510729
+  Notes: 
+   (1) To find all keys in a MapType column: https://stackoverflow.com/a/40603522/9510729
+
+   (2) To make the search case-insensitive, do the following:
+
+     + for Spark 3.0+
+      use transform_keys to convert map keys to lowercase, and then use `F.col('m')[k.lower()]` to 
+      access the corresponding values
+
+    df_new = df.withColumn("m", F.expr("str_to_map(value, '> *', '=<')")) \
+        .withColumn("m", F.expr("transform_keys(m, (k,v) -> lower(k))")) \
+        .select([ F.col('m')[k.lower()].alias(k) for k in keys ])
+
+     + for Spark 2.4.*, use the following to replace transform_keys()
+
+      map_from_entries(transform(map_keys(m), k -> (lower(k), m[k])))
+
+     + for Spark 2.3.*, use pandas_udf
+
+      ptn = "(?i)\\b({})(?==)".format('|'.join(keys))
+      lower_keys = F.pandas_udf(lambda s: s.str.replace(ptn, lambda m: m.group(1).lower()), "string")
+
+      df_new = df.withColumn('value', lower_keys('value')) \
+          .withColumn("m", F.expr("str_to_map(value, '> *', '=<')")) \
+          .select([ F.col('m')[k.lower()].alias(k) for k in keys ])
+
+
+Example-8-2: similar to above using str_to_map:
+    REF: https://stackoverflow.com/questions/50579452
+
+    df = spark.createDataFrame([
+      ('name:Pradnya,IP:100.0.0.4, college: SDM, year:2018',),
+      ('name:Ram, IP:100.10.10.5, college: BVB, semester:IV, year:2018',)
+    ], ['_c0'])
+
+    df.withColumn('id', F.monotonically_increasing_id()) \
+        .selectExpr("id", "explode(str_to_map(_c0,', *',':'))") \
+        .groupby("id") \
+        .pivot('key') \
+        .agg(F.first('value')) \
+        .show()
+    +---+-----------+-------+-------+--------+----+                                 
+    | id|         IP|college|   name|semester|year|
+    +---+-----------+-------+-------+--------+----+
+    |  0|  100.0.0.4|    SDM|Pradnya|    null|2018|
+    |  1|100.10.10.5|    BVB|    Ram|      IV|2018|
+    +---+-----------+-------+-------+--------+----+
+
