@@ -299,6 +299,20 @@ Example-8: extract values from String with specific patterns
           .select([ F.col('m')[k.lower()].alias(k) for k in keys ])
 
 
+  Example-8-extra: a little bit more complex than the above, where pairs are delimited by SPACE
+     which also exists in values and/or keys. thus we use lookahead anchor to set only SPACE 
+     followed by one of the keys
+
+    df = spark.createDataFrame([('Type=Series VRsomeTest Model=1Ac4 ID=4 sometesthere',)], ['value'])
+
+    df.withColumn("m", F.expr("str_to_map(value,'(?i) +(?=(?:type|model|id|conn seq))','=')")).show(1,0)
+    +---------------------------------------------------+----------------------------------------------------------------+
+    |value                                              |m                                                               |
+    +---------------------------------------------------+----------------------------------------------------------------+
+    |Type=Series VRsomeTest Model=1Ac4 ID=4 sometesthere|[Type -> Series VRsomeTest, Model -> 1Ac4, ID -> 4 sometesthere]|
+    +---------------------------------------------------+----------------------------------------------------------------+
+
+
 Example-8-2: similar to above using str_to_map:
     REF: https://stackoverflow.com/questions/50579452
 
