@@ -115,3 +115,48 @@ Example-2: map values read from one column
 
 
 
+
+Example-3: use regexp_extract to retrieve values of supplied keys and their aliases:
+  REF: https://stackoverflow.com/a/64704947/9510729
+  Code:
+
+    df = spark.createDataFrame([                                               
+       ("otherPartofString Name=<Series VR> Type=<1Ac4> SqVal=<34> conn ID=<2>",),   
+       ("otherPartofString ThisName=<Series X> Type=<1B3> SqVal=<34> conn ID=<2> conn Loc=sfo dest=chc bridge otherpartofString..",)
+    ],["value"])
+    
+    keys = ["Name", "Type", "SqVal", "ID", "Loc", "dest"]
+    
+    # aliases are case-insensitive and added only if exist
+    key_aliases = {
+        'Type': [ 'ThisType', 'AnyName' ],
+        'ID': ['conn ID'],
+        'Loc': ['conn Loc']
+    }
+    
+    # set up regex pattern for each key differently
+    key_ptns = [ (k, '|'.join([k, *key_aliases[k]]) if k in key_aliases else k) for k in keys ]  
+    #[('Name', 'Name'),
+    # ('Type', 'Type|ThisType|AnyName'),
+    # ('SqVal', 'SqVal'),
+    # ('ID', 'ID|conn ID'),
+    # ('Loc', 'Loc|conn Loc'),
+    # ('dest', 'dest')]  
+    
+    df.withColumn('value', F.regexp_replace('value','=(\w+)','=<$1>')) \
+        .select("*", *[F.regexp_extract('value', r'(?i)\b(?:{0})=<([^>]+)>'.format(p), 1).alias(k) for k,p in key_ptns]) \
+        .show()
+    +--------------------+---------+----+-----+---+---+----+
+    |               value|     Name|Type|SqVal| ID|Loc|dest|
+    +--------------------+---------+----+-----+---+---+----+
+    |otherPartofString...|Series VR|1Ac4|   34|  2|   |    |
+    |otherPartofString...| Series X| 1B3|   34|  2|sfo| chc|
+    +--------------------+---------+----+-----+---+---+----+
+    
+ Notes:
+ (1) possibly better to sort aliases by length, in case there are `conn ID`, `Loc ID` for different keys, in such case `ID` should be set after `conn ID` and `Loc ID`
+
+    key_ptns = [ (k, '|'.join(sorted([k]+key_aliases[k],key=len,reverse=True)) if k in key_aliases else k) for k in keys ]
+
+ 
+
