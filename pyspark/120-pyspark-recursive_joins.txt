@@ -1,0 +1,130 @@
+Examples using Recursive Joins:
+
+
+Example-1: find all child-components related to an identifier
+  REF: https://stackoverflow.com/questions/58666808
+
+    from pyspark.sql import functions as F
+    from pyspark.sql import DataFrame
+
+    df = spark.createDataFrame([
+        ('xxxx', 'yyyy'), ('xxxx', 'zzzz'), ('xxxx', 'aaaa'), ('aaaa', 'bbbb'), ('aaaa', 'cccc'),
+        ('bbbb', 'dddd'), ('bbbb', 'eeee'), ('cccc', 'ffff'), ('cccc', 'mmmm'), ('ffff', 'aaaa'), 
+        ('ffff', 'gggg'), ('ffff', 'hhhh'), ('hhhh', 'iiii'), ('hhhh', 'jjjj')
+    ], ['identifier', 'component'])
+
+    """Method-1 For Spark 2.4+, using array_contains():
+    (1) groupby `identifier` and save all associated component into an array of strings, add a new 
+        column `processed_components` initialize as `array('identifier')`
+    (2) do self-leftjoin(aliased with d1, d2) with the following conditions
+       + array_contains(d1.components, d2.identifier)
+       + !array_contains(d1.processed_components, d2.identifier)
+    (3) in the aggregate function, update components and processed_components to
+       + components = array_union(first(d1.components), flatten(collect_set(d2.components)))
+       + processed_components = first(d1.components)
+    (4) repeat the above (2)+(3) until the following conditions both satisfy:
+       + d.filter("components!=processed_components").count() > 0
+       + max_iter > 1
+    """
+    df2 = df.groupby('identifier').agg(F.collect_set('component').alias('components')) \
+        .withColumn("processed_components", F.array('identifier'))
+    +----------+------------------+--------------------+
+    |identifier|components        |processed_components|
+    +----------+------------------+--------------------+
+    |aaaa      |[bbbb, cccc]      |[aaaa]              |
+    |hhhh      |[iiii, jjjj]      |[hhhh]              |
+    |bbbb      |[eeee, dddd]      |[bbbb]              |
+    |cccc      |[mmmm, ffff]      |[cccc]              |
+    |ffff      |[hhhh, aaaa, gggg]|[ffff]              |
+    |xxxx      |[zzzz, yyyy, aaaa]|[xxxx]              |
+    +----------+------------------+--------------------+
+
+    def recursive_join(d: DataFrame, max_iter: int=10) -> DataFrame:
+      def find_child_comp(_df: DataFrame) -> DataFrame:
+        return _df.alias('d1').join(_df.alias('d2'),
+            F.expr("""
+              array_contains(d1.components, d2.identifier) AND !array_contains(d1.processed_components, d2.identifier)
+            """),
+            "left"
+          ).groupBy("d1.identifier") \
+           .agg(
+             F.expr("array_union(first(d1.components), flatten(collect_set(d2.components))) as components"), 
+             F.expr("first(d1.components) as processed_components")
+         )
+      d = find_child_comp(d).persist()
+      if (d.filter("components!=processed_components").count() > 0) & (max_iter > 1):
+        d = recursive_join(d, max_iter-1)
+      return d
+
+    df_new = recursive_join(df2)
+
+    df_new.select('identifier', 'components').show(10,0)
+    +----------+------------------------------------------------------------------------------+
+    |identifier|components                                                                    |
+    +----------+------------------------------------------------------------------------------+
+    |aaaa      |[bbbb, cccc, eeee, dddd, mmmm, ffff, hhhh, aaaa, gggg, iiii, jjjj]            |
+    |hhhh      |[iiii, jjjj]                                                                  |
+    |bbbb      |[eeee, dddd]                                                                  |
+    |cccc      |[mmmm, ffff, hhhh, aaaa, gggg, bbbb, cccc, eeee, dddd, iiii, jjjj]            |
+    |ffff      |[hhhh, aaaa, gggg, iiii, jjjj, bbbb, cccc, eeee, dddd, mmmm, ffff]            |
+    |xxxx      |[zzzz, yyyy, aaaa, bbbb, cccc, eeee, dddd, mmmm, ffff, hhhh, gggg, iiii, jjjj]|
+    +----------+------------------------------------------------------------------------------+
+
+    """Method-2: Spark 2.3 use find_in_set
+    (1) groupby `identifier` and concatenate all associated component into a comma-dilimited string, add a new 
+        column `processed_components` initialize as `'identifier'`
+    (2) do self-leftjoin(aliased with d1, d2) with the following conditions
+       + find_in_set(d2.identifier, d1.components)>0
+       + find_in_set(d2.identifier, d1.processed_components)<1
+    (3) in the aggregate function, update components and processed_components to
+       + components = concat_ws(',', first(d1.components), concat_ws(',',collect_set(d2.components)))
+       + processed_components = first(d1.components)
+         notice we need to trim the trailing comma from when d2.components is NULL and collect_set(..) is EMPTY
+    (4) repeat the above (2)+(3) until the following conditions both satisfy:
+       + d.filter("components!=processed_components").count() > 0
+       + max_iter > 1
+    (5) split components by `,` and then take pandas_udf to convert it into array of string with unique elements
+    """
+    def recursive_join(d, max_iter=10):
+      def find_child_comp(_df):
+        return _df.alias('d1').join(_df.alias('d2'), 
+            F.expr("find_in_set(d2.identifier, d1.components)>0 AND find_in_set(d2.identifier, d1.processed_components)<1"),
+            "left"
+           ).groupBy("d1.identifier") \
+            .agg(
+              F.expr("""
+                /* concat d1.components, entries in collect_set(d2.components)
+                 * and then remove trailing comma from when d2.components is NULL */
+                trim(TRAILING ',' FROM
+                    concat_ws(',', first(d1.components), concat_ws(',',collect_set(d2.components))) 
+                ) as components"""),
+              F.expr("first(d1.components) as processed_components")
+            )
+      d = find_child_comp(d).persist()
+      if (d.filter("components!=processed_components").count() > 0) & (max_iter > 1):
+        d = recursive_join(d, max_iter-1)
+      return d
+
+    import pandas as pd
+    get_uniq = F.pandas_udf(lambda s: pd.Series([ list(set(x)) for x in s ]), "array<string>")
+
+    df1 = df.groupby('identifier').agg(F.concat_ws(',',F.collect_set('component')).alias('components')) \
+        .withColumn('processed_components', F.col('identifier'))
+
+    d2 = recursive_join(df1)
+
+    d2.select('identifier', get_uniq(F.split('components',','))).show(10,0)
+    +----------+------------------------------------------------------------------------------+
+    |identifier|components                                                                    |
+    +----------+------------------------------------------------------------------------------+
+    |aaaa      |[cccc, jjjj, aaaa, gggg, hhhh, eeee, iiii, bbbb, dddd, mmmm, ffff]            |
+    |hhhh      |[jjjj, iiii]                                                                  |
+    |bbbb      |[dddd, eeee]                                                                  |
+    |cccc      |[cccc, jjjj, aaaa, gggg, iiii, eeee, bbbb, hhhh, mmmm, ffff, dddd]            |
+    |ffff      |[cccc, jjjj, aaaa, gggg, iiii, eeee, bbbb, hhhh, mmmm, ffff, dddd]            |
+    |xxxx      |[cccc, jjjj, yyyy, aaaa, gggg, zzzz, eeee, iiii, bbbb, hhhh, mmmm, ffff, dddd]|
+    +----------+------------------------------------------------------------------------------+
+
+
+
+
