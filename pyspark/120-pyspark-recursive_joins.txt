@@ -127,4 +127,79 @@ Example-1: find all child-components related to an identifier
 
 
 
+Example-2: find all related IDs
+  REf: https://stackoverflow.com/q/64920088/9510729
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([
+      (123, "mike", [345,456]), (345, "alen", [789]), (456, "sam", [789,999]), 
+      (789, "marc", [111]), (555, "dan", [333])
+    ],["ID", "NAME", "RELATED_IDLIST"])
+
+  **Functions defined:**
+    # define a function which takes dataframe as input, does a self left-join and then return another dataframe 
+    # with exactly the same schema as the input dataframe
+    def recursive_join(d, max_iter=10):
+      # function to find direct child-IDs and merge them into RELATED_IDLIST
+      def find_child_idlist(_df):
+        return _df.alias('d1').join(
+            _df.alias('d2'), 
+            F.expr("find_in_set(d2.ID,d1.RELATED_IDLIST)>0 AND find_in_set(d2.ID,d1.PROCESSED_IDLIST)<1"),
+            "left"
+          ).groupby("d1.ID", "d1.NAME").agg(
+            F.expr("""
+              /* concat d1.RELATED_IDLIST, entries in collect_set(d2.RELATED_IDLIST)
+               * and then remove trailing comma from when all d2.RELATED_IDLIST are NULL */
+              trim(TRAILING ',' FROM
+                concat_ws(",", first(d1.RELATED_IDLIST), concat_ws(",", collect_list(d2.RELATED_IDLIST)))
+              ) as RELATED_IDLIST"""),
+            F.expr("first(d1.RELATED_IDLIST) as PROCESSED_IDLIST")
+        )
+      # main code logic below
+      d = find_child_idlist(d).persist()
+      if (d.filter("RELATED_IDLIST!=PROCESSED_IDLIST").count() > 0) & (max_iter > 1):
+        d = recursive_join(d, max_iter-1)
+      return d
+
+    # define pandas_udf to remove duplicate from an ArrayType column
+    import pandas as pd
+    get_uniq = F.pandas_udf(lambda s: pd.Series([ list(set(x)) for x in s ]), "array<int>")
+
+ **Where:** 
+  1. in the function find_child_idlist, the left join condition must satisfy the following two conditions:
+    + d2.ID is in d1.RELATED_IDLIST:    find_in_set(d2.ID,d1.RELATED_IDLIST)>0 
+    + d2.ID not in d1.PROCESSED_IDLIST: find_in_set(d2.ID,d1.PROCESSED_IDLIST)<1
+  2. in the aggregate function to recalculate **RELATED_IDLIST** and **PROCESSED_IDLIST**
+
+  ** Processing:**
+  1. add a new column `PROCESSED_IDLIST` to save `RELATED_IDLIST` in the previous join
+
+       df1 = df.withColumn('RELATED_IDLIST', F.concat_ws(',','RELATED_IDLIST')) \
+           .withColumn('PROCESSED_IDLIST', F.col('ID'))
+
+       df_new = recursive_join(df1, 5)
+       df_new.show(10,0)
+       +---+----+-----------------------+-----------------------+
+       |ID |NAME|RELATED_IDLIST         |PROCESSED_IDLIST       |
+       +---+----+-----------------------+-----------------------+
+       |555|dan |333                    |333                    |
+       |789|marc|111                    |111                    |
+       |345|alen|789,111                |789,111                |
+       |123|mike|345,456,789,789,999,111|345,456,789,789,999,111|
+       |456|sam |789,999,111            |789,999,111            |
+       +---+----+-----------------------+-----------------------+
+
+  2. split `RELATED_IDLIST` into array of ints and then use pandas_udf function to drop duplicated array elements:
+
+       df_new.withColumn("RELATED_IDLIST", get_uniq(F.split('RELATED_IDLIST', ',').cast('array<int>'))).show(10,0)
+       +---+----+-------------------------+-----------------------+                    
+       |ID |NAME|RELATED_IDLIST           |PROCESSED_IDLIST       |
+       +---+----+-------------------------+-----------------------+
+       |555|dan |[333]                    |333                    |
+       |789|marc|[111]                    |111                    |
+       |345|alen|[789, 111]               |789,111                |
+       |123|mike|[999, 456, 111, 789, 345]|345,456,789,789,999,111|
+       |456|sam |[111, 789, 999]          |789,999,111            |
+       +---+----+-------------------------+-----------------------+
 
