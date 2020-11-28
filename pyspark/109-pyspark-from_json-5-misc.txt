@@ -1,0 +1,59 @@
+miscellaneous `from_json` implementations:
+
+---
+Example-1: translate braces to square brackets and then use from_json
+  REF: https://stackoverflow.com/questions/63496226
+  Target: to parse a StringType field saving a Python list of tuples containing strings
+          translate '()' into '[]' and make it a String that can be understood by PySpark from_json function
+          Notice that from_json by default allow single quotes to enclose fields/values
+
+    inputdf = spark.createDataFrame([
+        ("100", "[('john', 'customer'), ('abc, mno, xyz', 'purchase'), ('smith', 'customer')]"),
+        ("200", "[('doe', 'customer')]"),
+    ], ['rowNum', 'infoCol'])   
+
+    inputdf.withColumn('infoCol', expr("explode(from_json(translate(infoCol,'()','[]'),'array<array<string>>'))")) \
+        .selectExpr('rowNum', 'infoCol[0] as value', 'infoCol[1] as key') \
+        .groupby('rowNum') \
+        .pivot('key') \
+        .agg(collect_list('value')) \
+        .show()
+    +------+-------------+---------------+                                          
+    |rowNum|     customer|       purchase|
+    +------+-------------+---------------+
+    |   200|        [doe]|             []|
+    |   100|[john, smith]|[abc, mno, xyz]|
+    +------+-------------+---------------+
+
+
+Example-2: get_json_object dynamically create JSONPath using column values
+  REF: https://stackoverflow.com/q/64712213/9510729
+  Method: 
+   (1) use `concat('$.',source_word,'.method1[*].w')` as JSONPath(yields `$.source_1.method1[*].w` for Row-1)
+   (2) use `get_json_object(json_col, ..)` to retrieve a string like `["target_1","target_3"]` for Row-1 or NULL for Row-2
+   (3) use `from_json(.., 'array<string>')` to convert the above to array of strings
+   (4) use `array_contains(.., target_word)` to identify if `target_word` exists in the array
+  Code in Scala:
+
+    val df = Seq(
+       ("source_1", "target_1", """{"source_1":{"method1":[{"w":"target_1"},{"w":"target_3"}]}}"""),
+       ("source_2", "target_2", """{"source_2":{"method2":[{"w":"target_2"},{"w":"target_4"}]}}""")
+    ).toDF("source_word", "target_word", "json_col")
+
+    df.createOrReplaceTempView("tbl")
+
+    spark.sql("""
+      SELECT source_word, target_word
+      FROM tbl
+      WHERE 
+        array_contains(
+          from_json(get_json_object(json_col, concat('$.',source_word,'.method1[*].w')), 'array<string>'),
+          target_word
+        )
+    """).show
+    +-----------+-----------+
+    |source_word|target_word|
+    +-----------+-----------+
+    |   source_1|   target_1|
+    +-----------+-----------+
+
