@@ -1,0 +1,113 @@
+
+
+Example-2: Handling skewness data when using Window aggregate functions: lag, lead:
+
+REF: https://stackoverflow.com/q/64967300/9510729
+
+Add a new partitioner using the column from orderBy(most likely a numeric column or date/timestamp
+column which can be converted into numeric). Since lag/lead functions are vectorized, this means that 
+the newly calculated values using lag/lead etc will not have any influence on the calculation of the 
+downstream rows. Thus after the new partitioner is added, the values calculated 
+inside the partitions are fine, only rows on the boundaries need to be fixed.
+
+Assume we have the following WindowSpec and a simple aggregate function:
+
+    w = Window.partitionBy('p_col').orderBy('o_col')
+    df.withColumn('new_col', F.lag('val',1).over(w) + F.lead('val',1).over(w))
+
+Then do the following: 
+
+1. select a **N** to split `o_col` and set up an additional partitionBy column `pid` (use `ceil`, `int`, `floor` etc.)
+   Here assumed `o_col` is a TimestampType column and set up `N` to cover 2-year intervals:
+
+       N = 24*3600*365*2
+       df1 = df.withColumn('pid', F.ceil(F.unix_timestamp('o_col')/N))
+
+2. add `pid` to partitionBy clause(see `w1`), then calaulte `row_number()`, `lag()` and `lead()`
+   over `w1`. find also number of rows (`cnt`) in each new partition to help identify the end of partitions (`rn == cnt`).
+   the resulting *new_val* will be fine for majority of rows except those on the boundaries of each partition.
+
+       w1 = Window.partitionBy('p_col', 'pid').orderBy('o_col')
+       w2 = Window.partitionBy('p_col', 'pid')
+
+       df2 = df1.select(
+           '*',
+           F.count('*').over(w2).alias('cnt'),
+           F.row_number().over(w1).alias('rn'),
+           (F.lag('val',1).over(w1) + F.lead('val',1).over(w1)).alias('new_val')
+       )
+
+3. process the boundary: select rows which are on the boundaries `rn in (1, cnt)` plus those which has values 
+    used in calculation `rn in (2, cnt-1)`, use the same function to calculate **new_val** over `w` and save
+    only boundary rows.
+    
+       df3 = df2.filter('rn in (1, 2, cnt-1, cnt)') \
+           .withColumn('new_val', F.lag('val',1).over(w) + F.lead('val',1).over(w)) \
+           .filter('rn in (1,cnt)')
+
+4. merge df3 back to df2 to update boundary rows `rn in (1,cnt)` and then drop intermediate columns used 
+   in implementing logic
+
+       df_new = df2.filter('rn not in (1,cnt)').union(df3)
+       
+       df_new = df_new.drop('cnt', 'rn')
+
+
+**Some Notes:**
+
+1. the following WindowSpec are defined:
+
+       w: Window.partitionBy('p_col').orderBy('o_col')          <-- fix boundary rows
+       w1: Window.partitionBy('p_col', 'pid').orderBy('o_col')  <-- calculate internal rows
+       w2: Window.partitionBy('p_col', 'pid')                   <-- find #rows in a partition
+
+2. do not overwrite the `val` column since they will be required in post-calculations with boundary rows,
+   use a new column name `new_val` instead
+
+3. if you know which partitions are skewed(which can be done using groupby+count), just divide them and skip others. 
+   the existing method might split a small partition into 2 or even more(if they are sparsely distributed)
+
+       df1 = df.withColumn('pid', F.when(F.col('p_col').isin('a','b'), F.ceil(F.unix_timestamp('o_col')/N)).otherwise(1))
+
+4. if only `lag(1)` function is used, just post-process left boundaries, filter by `rn in (1, cnt)` and update only `rn == 1`
+
+       df3 = df1.filter('rn in (1, cnt)') \
+           .select('p_col', 'pid', F.lag('val',1).over(w2).alias('new_val_1')) \
+           .filter('rn = 1')
+
+   similar to lead function when we need only to fix right boundaries and update `rn == cnt`
+
+5. if `lag(2)` is used, then filter and update more rows with `df3`:
+
+       df3 = df1.filter('rn in (1, 2, cnt-1, cnt)') \
+           .select('p_col', 'pid', F.lag('val',2).over(w2).alias('new_val_1')) \
+           .filter('rn in (1,2)')
+
+6. if the function contains min, max, pre-process them before df2
+
+       d1 = df1.groupby('p_col', 'pid') \
+           .agg(F.max('val').alias('max_val'), F.min('val').alias('min_val')) \
+           .groupby('p_col') \
+           .agg(F.array(F.min('min_val'), F.max('max_val'))) \
+           .rdd.collectAsMap()
+
+       # create a MapType column with key=p_col and value=array(min, max)
+       map1 = F.create_map(*[ e for k,vs in d1.items() for e in [ F.lit(k), F.array(F.lit(vs[0]), F.lit(vs[1]))] ])
+
+       df1 = df1.withColumn('min_val', map1[F.col('p_col')][0]) \
+           .withColumn('max_val', map1[F.col('p_col')][1])
+
+       # Another way to calculate `d1` using aggregateByKey
+       d1 = df.select('app_id', 'amount').rdd.map(tuple) \
+           .aggregateByKey(
+               (0,0), 
+               lambda x,y: (min(x[0],y), max(x[1],y)), 
+               lambda x,y: (min(x[0],y[0]), max(x[1],y[1]))
+           ).collectAsMap()
+
+       
+
+
+
+
+
