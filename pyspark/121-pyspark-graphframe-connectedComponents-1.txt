@@ -1,12 +1,15 @@
-REF: https://stackoverflow.com/questions/59034395/how-to-do-this-transformation-in-sql-spark-graphframes
+Example using Graphframe and networkx/pandas_udf
 
-Use GraphFrame to collect all linked devices/accounts and group them into one uuid (component)
 
-The trick is to merge Account-ID and Device-ID, but add a prefix to Device-ID so that we can 
-separate them later in the post-processing steps.
+---
+Example-0: Use GraphFrame to collect all linked devices/accounts and group them into one uuid (component)
+  REF: https://stackoverflow.com/questions/59034395/how-to-do-this-transformation-in-sql-spark-graphframes
+       https://graphframes.github.io/graphframes/docs/_site/api/python/graphframes.html
+  Method: The trick is to merge Account-ID and Device-ID, but add a prefix to Device-ID so that we can 
+      separate them later in the post-processing steps.
 
-+ vertices: all distinct device-IDs and account-IDs
-+ edges: the dataframe itself
+  + vertices: all distinct device-IDs and account-IDs
+  + edges: the dataframe itself
 
     df = spark.createDataFrame([ 
              ("d1","a1"), ("d2","a1"), ("d1","a2"), ("d1","a4"), 
@@ -48,19 +51,38 @@ separate them later in the post-processing steps.
     |        [d4]|                [a6]|  309237645312|
     +------------+--------------------+--------------+
 
-
-**Notes:**
-
-1. download the jar file from: https://spark-packages.org/package/graphframes/graphframes
-
-2. add related options to run pyspark or spark-submit, for example:
+  **Notes:**
+  1. download the jar file from: https://spark-packages.org/package/graphframes/graphframes
+  2. add related options to run pyspark or spark-submit, for example:
 
    pyspark --packages graphframes:graphframes:0.7.0-spark2.4-s_2.11 --jars /path/to/graphframes-0.7.0-spark2.4-s_2.11.jar
 
-3. `g.connectedComponents()` could be slow, you might need to tweak the performance by checking its arguments or adjust your spark conf like `spark.sql.shuffle.partitions` etc.
+  3. `g.connectedComponents()` could be slow, you might need to tweak the performance by checking its arguments or adjust your spark conf like `spark.sql.shuffle.partitions` etc.
 
 
-REF: https://graphframes.github.io/graphframes/docs/_site/api/python/graphframes.html
-    
-    
-    
+Example-7: groupby related items and do the aggregated sum:
+  REF: https://stackoverflow.com/q/65136922/9510729
+  Note: use networkx with pandas_udf if the connected_components are calculated per-group instead of on the whole dataframe.
+
+    import networkx as nx
+    import pandas as pd
+
+    @F.pandas_udf("items:array<string>,items_bought:int", F.PandasUDFType.GROUPED_MAP)
+    def connected_components(pdf: pd.DataFrame) -> pd.DataFrame:
+        G = nx.from_pandas_edgelist(pdf.rename(columns={'session_start_id':'source','session_end_id':'target'}))
+        connected = [ *nx.connected_components(G) ]
+        dct = { e:i for i,x in enumerate(connected) for e in x }
+        e = pdf['session_start_id'].map(dct)
+        s1 = pd.Series(map(list,connected)).rename('items')
+        s2 = pdf.groupby(e)['items_bought'].sum()
+        return pd.concat([s1,s2], axis=1)
+
+    df.groupby().applyInPandas(connected_components).show()
+    +------------+------------+
+    |       items|items_bought|
+    +------------+------------+
+    |[a, b, c, d]|           4|
+    |      [z, t]|           7|
+    +------------+------------+
+
+
