@@ -79,7 +79,7 @@ Example-2: sum of array elements depending on the value condition
 
 
 Example-3: merge two columns before doing pivot:
-  REF: https://stackoverflow.com/questions/64353811/pivot-multiple-columns-from-row-to-column
+  REF: https://stackoverflow.com/q/64353811/9510729
   Method: the pivot list are from concatenation of two columns, see below `p1` column
 
     from pyspark.sql.functions import expr, first
@@ -103,5 +103,85 @@ Example-3: merge two columns before doing pivot:
     |  5|five|           811|            70|            2819|        279|         13|          600|
     +---+----+--------------+--------------+----------------+-----------+-----------+-------------+
 
+
+
+Example-4: similar to example-3, stack/merge three columns and set up the pivot column
+  REF: https://stackoverflow.com/q/64499593/9510729
+  Method: use stack to normalize tag_name and (tag_value + Tag_stat), concat these two columns
+          and then do the pivot.
+  Notice: column inside the pivot argument can not be an expression, must be a single column name
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([
+        ('a1', 'Work', 'passHolder', 'Jack Ryan', 'verified', 1.5),
+        ('a1', 'Work', 'passNum', '1234', 'unverified', 1.5) 
+    ], ['Id', 'Type', 'Tag_name', 'Tag_value', 'Tag_stat', 'version']) 
+
+    df.selectExpr("Id", "Type", "Tag_name", "stack(2,'Tag', Tag_value, 'stat', Tag_stat) as (value, stat)", "version") \
+      .withColumn('p', F.concat_ws('_','Tag_name','value')) \
+      .groupby('Id', 'Type','version') \
+      .pivot('p') \
+      .agg(F.first('stat')) \
+      .show()
+    +---+----+-------+--------------+---------------+-----------+------------+      
+    | Id|Type|version|passHolder_Tag|passHolder_stat|passNum_Tag|passNum_stat|
+    +---+----+-------+--------------+---------------+-----------+------------+
+    | a1|Work|    1.5|     Jack Ryan|       verified|       1234|  unverified|
+    +---+----+-------+--------------+---------------+-----------+------------+
+
+
+
+Example-5: unpivot + pivot + full-join for dot-product:
+  REF: https://stackoverflow.com/questions/65145134
+  Target: given a pivot-table of user-page_clicks matrix, convert it to page-page matrix:
+
+    from pyspark.sql import functions as F
+
+    df_pivot = spark.createDataFrame([
+        ('user1', 1, 1, None, None), 
+        ('user2', 1, 1, None, None), 
+        ('user3', None, 1, 1, None), 
+        ('user4', None, None, None, 1)
+    ], ['UserId', 'productA', 'itemB', 'articleC', 'objectD'])
+
+    cols = df_pivot.columns[1:]
+
+    # unpivot/normalize the df_pivot to userId vs target
+    df1 = df_pivot.select(
+        'userId', 
+        F.explode(F.split(F.concat_ws('|', *[F.when(F.col(c).isNotNull(), F.lit(c)) for c in cols]),'\|')).alias('target')
+    )
+    #df1.show()
+    #+------+--------+
+    #|userId|  target|
+    #+------+--------+
+    #| user1|productA|
+    #| user1|   itemB|
+    #| user2|productA|
+    #| user2|   itemB|
+    #| user3|   itemB|
+    #| user3|articleC|
+    #| user4| objectD|
+    #+------+--------+
+
+    # self full-outer join
+    df2 = df1.join(df1.withColumnRenamed('target','target_1'),'userId','full')
+
+    # pivot
+    df_new = df2.groupby('target') \
+        .pivot('target_1', cols) \
+        .agg(F.countDistinct('userId')) \
+        .fillna(0, subset=cols)
+        
+    #df_new.show()
+    #+--------+--------+-----+--------+-------+
+    #|  target|productA|itemB|articleC|objectD|
+    #+--------+--------+-----+--------+-------+
+    #|productA|       2|    2|       0|      0|
+    #|   itemB|       2|    3|       1|      0|
+    #|articleC|       0|    1|       1|      0|
+    #| objectD|       0|    0|       0|      1|
+    #+--------+--------+-----+--------+-------+
 
 
