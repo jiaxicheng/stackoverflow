@@ -235,6 +235,7 @@ Example-4: populate missing dates using sequence + transform + inline
     +----------+-----+
 
 
+
 Example-5: similar to the above Example-4, but fix missing months
   REF: https://stackoverflow.com/q/64486068/9510729
   Task: add missing dates and calculate N-day moving averages
@@ -302,6 +303,7 @@ Example-5: similar to the above Example-4, but fix missing months
     +-------+---------+----------+-----+----------------+
 
 
+
 Example-6: similar to example-5
   Method: 
    (1) find `end_month` using Window aggregate function F.lead and fill the last null value with the current month
@@ -347,3 +349,42 @@ Example-6: similar to example-5
     |         2|  limited|    3|2020-11|
     |         2|  limited|    3|2020-12|
     +----------+---------+-----+-------+
+
+
+
+Example-7: use sequence to take N-gram of an ArrayType column:
+  REF: https://stackoverflow.com/questions/65340994/exploding-an-array-into-2-columns
+
+    df = spark.createDataFrame([
+        (1,"TTT A B X Y Z CUSTOMER"),
+        (2,"YYY E Y F G I P B X Q CUSTOMER"),
+    ],["ID","Route"])
+
+    df_new = df.withColumn('dta', F.split('Route',' ')) \
+        .selectExpr("ID", "inline(transform(sequence(0,size(dta)-2), i -> (dta[i] as START, dta[i+1] as END)))")
+
+    df_new.show()
+    +---+-----+--------+
+    | ID|START|     END|
+    +---+-----+--------+
+    |  1|  TTT|       A|
+    |  1|    A|       B|
+    |  1|    B|       X|
+    |  1|    X|       Y|
+    |  1|    Y|       Z|
+    |  1|    Z|CUSTOMER|
+    |  2|  YYY|       E|
+    |  2|    E|       Y|
+    |  2|    Y|       F|
+    |  2|    F|       G|
+    |  2|    G|       I|
+    |  2|    I|       P|
+    |  2|    P|       B|
+    |  2|    B|       X|
+    |  2|    X|       Q|
+    |  2|    Q|CUSTOMER|
+    +---+-----+--------+
+
+
+
+
