@@ -305,7 +305,7 @@ Example-8: extract values from String with specific patterns
 
     df = spark.createDataFrame([('Type=Series VRsomeTest Model=1Ac4 ID=4 sometesthere',)], ['value'])
 
-    df.withColumn("m", F.expr("str_to_map(value,'(?i) +(?=(?:type|model|id|conn seq))','=')")).show(1,0)
+    df.withColumn("m", F.expr("str_to_map(value,'(?i) +(?=type|model|id|conn seq)','=')")).show(1,0)
     +---------------------------------------------------+----------------------------------------------------------------+
     |value                                              |m                                                               |
     +---------------------------------------------------+----------------------------------------------------------------+
@@ -334,3 +334,42 @@ Example-8-2: similar to above using str_to_map:
     |  1|100.10.10.5|    BVB|    Ram|      IV|2018|
     +---+-----------+-------+-------+--------+----+
 
+
+Example-8-3: create Map, using rtrim to remove potential unwanted chars.
+  REF: https://stackoverflow.com/q/65307143/9510729
+  Method: adding `rtrim` is better than using pariDelim=`"\\s*\\||"$` which yields an extra EMPTY key, see below `Note`
+
+    text="""ABC:"MobileData"|XYZ:"TableData"|ZXC:"MacData"|MNB:"WindowData"
+ABC:"value1"    |XYZ:"value2"   |ZXC:"value3" |MNB:"value4"
+ABC: "valueA"   |XYZ:"ValueB"   |ZXC:"valueC" |MNB:"valueD"|POI:"valueE"
+ABC:"value11"    |XYZ:"value12"   |ZXC:"value13" |MNB:"value14"
+ABC:"value1A"    |XYZ:"value2A"   |ZXC:"value3A"
+    """
+
+    df = spark.read.csv(spark.sparkContext.parallelize(text.split('\n')), sep='\n').toDF('value')
+
+    df.selectExpr(r"""str_to_map(rtrim('"',value),'"\\s*\\|', ':\\s*"') as m""").show(truncate=False)
+    +---------------------------------------------------------------------------+
+    |m                                                                          |
+    +---------------------------------------------------------------------------+
+    |[ABC -> MobileData, XYZ -> TableData, ZXC -> MacData, MNB -> WindowData]   |
+    |[ABC -> value1, XYZ -> value2, ZXC -> value3, MNB -> value4]               |
+    |[ABC -> valueA, XYZ -> ValueB, ZXC -> valueC, MNB -> valueD, POI -> valueE]|
+    |[ABC -> value11, XYZ -> value12, ZXC -> value13, MNB -> value14]           |
+    |[ABC -> value1A, XYZ -> value2A, ZXC -> value3A]                           |
+    +---------------------------------------------------------------------------+
+
+  Note: this can also be handled with rtrim:
+
+    df.selectExpr(r"""str_to_map(value,'"\\s*\\||"$', ':\\s*"') as m""").show(truncate=False)
+    +--------------------------------------------------------------------------------+
+    |m                                                                               |
+    +--------------------------------------------------------------------------------+
+    |[ABC -> MobileData, XYZ -> TableData, ZXC -> MacData, MNB -> WindowData,  ->]   |
+    |[ABC -> value1, XYZ -> value2, ZXC -> value3, MNB -> value4,  ->]               |
+    |[ABC -> valueA, XYZ -> ValueB, ZXC -> valueC, MNB -> valueD, POI -> valueE,  ->]|
+    |[ABC -> value11, XYZ -> value12, ZXC -> value13, MNB -> value14,  ->]           |
+    |[ABC -> value1A, XYZ -> value2A, ZXC -> value3A,  ->]                           |
+    +--------------------------------------------------------------------------------+
+
+    
