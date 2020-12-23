@@ -1,0 +1,109 @@
+Use backslash inside String literals:
+
+
+---
+Example-1: escape backslashes in Scala string literals (including regex patterns)
+  REF: https://stackoverflow.com/a/65403993/9510729
+  
+it's all about how to escape characters inside the String literals. By default, string literals (including 
+regex patterns) are not escaped and you will have to use backslash to manually escape the literal backslashes. 
+for example:
+
+    val df = Seq("urn:fb:xyx:266730227", "urn:fb:pqr:(urn:fb:abc:6217401,10444030746)").toDF("value")
+    df.createOrReplaceTempView("tbl")
+  
+    // pattern as regular string literal
+    df.withColumn("p_id", regexp_extract($"value", "(\\d+)", 1)).show(false)
+    +-------------------------------------------+---------+
+    |value                                      |p_id     |
+    +-------------------------------------------+---------+
+    |urn:fb:xyx:266730227                       |266730227|
+    |urn:fb:pqr:(urn:fb:abc:6217401,10444030746)|6217401  |
+    +-------------------------------------------+---------+
+
+this can be overcome by using raw string or multi-Line string on the pattern:
+
+    // pattern as raw string
+    df.withColumn("p_id", regexp_extract($"value", raw"(\d+)", 1)).show(false)
+    +-------------------------------------------+---------+
+    |value                                      |p_id     |
+    +-------------------------------------------+---------+
+    |urn:fb:xyx:266730227                       |266730227|
+    |urn:fb:pqr:(urn:fb:abc:6217401,10444030746)|6217401  |
+    +-------------------------------------------+---------+
+
+    // pattern as multi-Line string where backslash is not escaped
+    df.withColumn("p_id", regexp_extract($"value", """(\d+)""", 1)).show(false)
+    +-------------------------------------------+---------+
+    |value                                      |p_id     |
+    +-------------------------------------------+---------+
+    |urn:fb:xyx:266730227                       |266730227|
+    |urn:fb:pqr:(urn:fb:abc:6217401,10444030746)|6217401  |
+    +-------------------------------------------+---------+
+
+
+When **backslashes** and *regexp_extract*(*regexp_replace*, *split*, *str_to_map* etc.) are shown inside an SQL 
+expression, like `expr()`, `df.selectExpr()`, `spark.sql()`, `df.filter()`, `df.where()` etc., we will have to 
+double-escape the backslashes. for example:
+
+    // regular string literals
+    spark.sql("select *, regexp_extract(value, '(\\\\d+)', 1) as p_id from tbl").show
+    // raw string to SQL expression
+    spark.sql(raw"select *, regexp_extract(value, '(\\d+)', 1) as p_id from tbl").show
+    // multi-Line string to SQL expression
+    spark.sql("""select *, regexp_extract(value, '(\\d+)', 1) as p_id from tbl""").show
+
+    df.withColumn("p_id", expr("regexp_extract(value, '(\\\\d+)', 1)")).show(false)
+    df.withColumn("p_id", expr(raw"regexp_extract(value, '(\\d+)', 1)")).show(false)
+    df.withColumn("p_id", expr("""regexp_extract(value, '(\\d+)', 1)""")).show(false)
+
+    df.filter("value rlike '\\\\d'").show
+    df.filter(raw"value rlike '\\d'").show
+    df.filter("""value rlike '\\d'""").show
+
+For spark 2.0+, this can be surpassed by setting *spark.sql.parser.escapedStringLiterals*=**true** (default is `false`)
+see [here](https://github.com/apache/spark/blob/branch-3.0/sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/expressions/regexpExpressions.scala#L69)
+
+>   val ESCAPED_STRING_LITERALS = buildConf("spark.sql.parser.escapedStringLiterals")
+>    .internal()
+>    .doc("When true, string literals (including regex patterns) remain escaped in our SQL " +
+>      "parser. The default is false since Spark 2.0. Setting it to true can restore the behavior " +
+>      "prior to Spark 2.0.")
+>    .version("2.2.1")
+>    .booleanConf
+>    .createWithDefault(false)
+
+    spark.conf.set("spark.sql.parser.escapedStringLiterals", "true")
+
+    df.withColumn("p_id", expr("regexp_extract(value, '(\\d+)', 1)")).show(false)
+    df.withColumn("p_id", expr(raw"regexp_extract(value, '(\d+)', 1)")).show(false)
+    spark.sql("select *, regexp_extract(value, '(\\d+)', 1) as p_id from tbl").show
+    spark.sql("""select *, regexp_extract(value, '(\d+)', 1) as p_id from tbl""").show
+    df.filter(raw"value rlike '\d'").show
+
+**Side-note: the above discussion is about escaping the **literal** backslashes inside strings, in case er want the 
+actual escaped chars (i.e. newline `\n`, TAB `\t`, NUL char `\0` or `\u0000` etc), then no extra backslash is 
+required, for example:
+
+    // merge multiple lines into one line
+    spark.sql("select *, regexp_replace(x,'\n+',',') as y from values ('1,2\n3\n\n4') as (x)").show
+    // split string into an array using NUL char or/and TAB
+    spark.sql("select *, split(x,'[\t\u0000]+') as y from values ('s\u0000x\ty\tz') as (x)").show
+
+  Reference: 
+    [1] https://github.com/apache/spark/blob/master/sql/catalyst/src/main/scala/org/apache/spark/sql/internal/SQLConf.scala#L601
+    [2] https://github.com/apache/spark/blob/branch-3.0/sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/expressions/regexpExpressions.scala#L69
+
+
+
+
+3 baskslash == 4 backslashes
+
+
+sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/expressions/regexpExpressions.scala
+
+
+
+
+
+
