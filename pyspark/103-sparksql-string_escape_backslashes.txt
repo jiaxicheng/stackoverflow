@@ -4,10 +4,10 @@ Use backslash inside String literals:
 ---
 Example-1: escape backslashes in Scala string literals (including regex patterns)
   REF: https://stackoverflow.com/a/65403993/9510729
-  
-it's all about how to escape characters inside the String literals. By default, string literals (including 
-regex patterns) are not escaped and you will have to use backslash to manually escape the literal backslashes. 
-for example:
+  Points being: String literals (including regex patterns) are not escaped, to keep literal backslashes
+    inside strings or patterns, you will have to use backslash to manually escape them.
+
+  Example:
 
     val df = Seq("urn:fb:xyx:266730227", "urn:fb:pqr:(urn:fb:abc:6217401,10444030746)").toDF("value")
     df.createOrReplaceTempView("tbl")
@@ -95,15 +95,42 @@ required, for example:
     [2] https://github.com/apache/spark/blob/branch-3.0/sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/expressions/regexpExpressions.scala#L69
 
 
-
-
-3 baskslash == 4 backslashes
-
-
-sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/expressions/regexpExpressions.scala
+  Notes: the above is for Scala code, for Python code:
+    (1) Raw string is r"..."
+    (2) Multi-line string will escape backslash, so it's not working the same as Scala, need to use
+        r-string as well for multi-Line string: r"""..."""
 
 
 
+Example-2: backslashes for escaped chars
+ # discuss how escape works
+
+    df = spark.createDataFrame([("1,2\n3\n\n4",)]).toDF("value")
+
+    df.selectExpr("*", "regexp_replace(value,'\n+',',') as vals")         <-- work when 1 backslashes
+    df.selectExpr("*", "regexp_replace(value,'\\\\\\\n+',',') as vals")   <-- work when <= 7 backslashes
+    df.selectExpr("*", "regexp_replace(value,'\\\\\\\\n+',',') as vals")  <-- not work > 7 backslashes
+
+ How this happens: 1-7 backslashes work?
+  (1) escape on the SQL expression: 
+     1: '\n' becomes newline
+     7: '\\\\\\\n' becomes '\\\' + newline
+     8: '\\\\\\\\n' becomes '\\\\n'
+
+ (2) escape with the regex pattern:
+     1: newline is still newline (nothing to escape)
+     7: '\\\' + newline becomes '\' + newline (in regex pattern, this will be newline)   
+     8: '\\\\n' becomes '\\n' becomes backslash + `n`
+ 
+  Note: `\` followed by an newline inside a string literal is always a newline
+        `\` followed by a newline inside a pattern matches newline as well
+
+  In Raw-string:
+
+    df.selectExpr("*", r"regexp_replace(value,'\n+',',') as vals")         1 works     <newline>+
+    df.selectExpr("*", r"regexp_replace(value,'\\n+',',') as vals")        2 works     \n+
+    df.selectExpr("*", r"regexp_replace(value,'\\\n+',',') as vals")       3 works     \<newline>+
+    df.selectExpr("*", r"regexp_replace(value,'\\\\n+',',') as vals")      4+ not work \\n+
 
 
 
