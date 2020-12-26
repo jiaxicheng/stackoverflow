@@ -1,0 +1,195 @@
+Example-3: fix the boundaries using RDD mapPartitionsWithIndex to concatenate all rows in the same partitions into one, use the indices to identify and sort rows for the same source file. fix boundaies with the same method as shown in Example-2.
+
+REF: https://stackoverflow.com/questions/65376761/reading-a-multiline-csv-file-in-spark
+
+Sample data used in Task-1:
+===
+1,A,
+97,,
+1,A,98
+1,A,
+99,,
+2,B,100
+2,B,95
+2,,
+B,3,
+3,C,100,,,,,3,C,,,,10
+4,,
+D,8,
+,,,
+,,4,
+F,,
+100,,
+===
+
+Task-1: large number of small files
+  (1) use spark.read.text and wholetext=True to load each file into its own row
+  (2) use regexp_replace + trim to merge all rows into one row, 
+      then regexp_replace + split + explode to divide the line into rows based on a regex pattern
+
+    from pyspark.sql import functions as F
+    df = spark.read.text('/home/xicheng/test/read-3.txt', wholetext=True)
+
+    df.withColumn('value', F.expr("trim(BOTH ',' from regexp_replace(value, '[,\n]+', ','))")) \
+        .withColumn('value1', F.expr(r"""
+            explode(split(regexp_replace(value, '(\\d+,(?=[^,]*[^\\d])[^,]+,\\d+),', '$1\0'),'\0'))
+         """)) \
+        .show(truncate=False)
+    +----------------------------------------------------------------------+-------+
+    |value                                                                 |value1 |
+    +----------------------------------------------------------------------+-------+
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|1,A,97 |
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|1,A,98 |
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|1,A,99 |
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|2,B,100|
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|2,B,95 |
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|2,B,3  |
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|3,C,100|
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|3,C,10 |
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|4,D,8  |
+    |1,A,97,1,A,98,1,A,99,2,B,100,2,B,95,2,B,3,3,C,100,3,C,10,4,D,8,4,F,100|4,F,100|
+    +----------------------------------------------------------------------+-------+
+
+    # function to split a batch of comma-delimited strings into an array, 
+    # the elements see above value1
+    split_rows = lambda col: F.expr(fr"""
+        split(
+          regexp_replace(
+            trim(BOTH ',' from regexp_replace(`{col}`, '[,\n]+', ',')), 
+            '(\\d+,[^,\\d][^,]*,\\d+),',
+            '$1\0'
+          ),
+          '\0'
+        )
+    """)
+    
+    df_new = df.withColumn('value', F.explode(split_rows('value'))) \
+        .withColumn('vals', F.split('value', ',')) \
+        .selectExpr('vals[0] as id', 'vals[1] as name', 'vals[2] as mark')
+
+    df_new.show()
+    +---+----+----+
+    | id|name|mark|
+    +---+----+----+
+    |  1|   A|  97|
+    |  1|   A|  98|
+    |  1|   A|  99|
+    |  2|   B| 100|
+    |  2|   B|  95|
+    |  2|   B|   3|
+    |  3|   C| 100|
+    |  3|   C|  10|
+    |  4|   D|   8|
+    |  4|   F| 100|
+    +---+----+----+
+
+
+Task-2: large files
+  Note: below logic only works when:
+   (1) A regexp pattern can be used to identify the line, in this case:
+
+        \d+,[^,\d][^,]*,\d+
+      
+     id: digits-only: \d+
+     name: not null/empty and at least one non-digit: [^,\d][^,]*
+     mark: digit-only: \d+
+
+   (2) mapPartitionWithIndex creates indices(`sid`) which are monotonically increasing for each file
+       based on the original row position, so that the orderBy `sid` make sense.
+
+Step-1: sample dataframe are created from 2 files (1.txt and 2.txt) loaded by sc.textFile 
+        with each files on multiple partitions:
+
+    rdd = sc.textFile('/home/xicheng/test/read3', 5)
+    #rdd.glom().collect()
+    #[['1,A,', '97,,', '1,A,98', '1,A,', '99,,', '2,B,100'],             <-- 1.txt
+    # ['2,B,95', '2,,', 'B,3,', '3,C,100,,,,,3,C,,,,10'],                <-- 1.txt
+    # [],                                                                <-- 1.txt
+    # ['4,,', 'D,8,', ',,,', ',,4,', 'F,,', '100,,', '4,F,23,,,4,G'],    <-- 2.txt
+    # ['20,,', '5,', 'G,,100', '5,G,12,5,G'],                            <-- 2.txt
+    # [',,', ',,', '123']]                                               <-- 2.txt
+
+
+Step-2: use mapPartitionsWithIndex to merge each partition into one line and plus its index. convert it into 
+        dataframe and retrieve the filename(`fname`) for grouping/partitioning purpose.
+        post-processing each row using `split_rows` function and do posexplode and size to find pos, col and cnt:
+
+    df1 = rdd.mapPartitionsWithIndex(lambda id,it: ([id, ','.join(it)],)) \
+        .toDF(['sid','value']) \
+        .withColumn('fname', F.substring_index(F.input_file_name(),'/',-1)) \
+        .withColumn('value', split_rows('value')) \
+        .select("*", F.posexplode_outer('value'),F.size('value').alias('cnt'))
+    df1.show(truncate=False)
+    +---+---------------------------------+-----+---+----------+---+
+    |sid|value                            |fname|pos|col       |cnt|
+    +---+---------------------------------+-----+---+----------+---+
+    |0  |[1,A,97, 1,A,98, 1,A,99, 2,B,100]|1.txt|0  |1,A,97    |4  |
+    |0  |[1,A,97, 1,A,98, 1,A,99, 2,B,100]|1.txt|1  |1,A,98    |4  |
+    |0  |[1,A,97, 1,A,98, 1,A,99, 2,B,100]|1.txt|2  |1,A,99    |4  |
+    |0  |[1,A,97, 1,A,98, 1,A,99, 2,B,100]|1.txt|3  |2,B,100   |4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|0  |2,B,95    |4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|1  |2,B,3     |4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|2  |3,C,100   |4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|3  |3,C,10    |4  |
+    |2  |[]                               |1.txt|0  |          |1  |
+    |3  |[4,D,8, 4,F,100, 4,F,23, 4,G]    |2.txt|0  |4,D,8     |4  |
+    |3  |[4,D,8, 4,F,100, 4,F,23, 4,G]    |2.txt|1  |4,F,100   |4  |
+    |3  |[4,D,8, 4,F,100, 4,F,23, 4,G]    |2.txt|2  |4,F,23    |4  |
+    |3  |[4,D,8, 4,F,100, 4,F,23, 4,G]    |2.txt|3  |4,G       |4  |
+    |4  |[20,5,G,100, 5,G,12, 5,G]        |2.txt|0  |20,5,G,100|3  |
+    |4  |[20,5,G,100, 5,G,12, 5,G]        |2.txt|1  |5,G,12    |3  |
+    |4  |[20,5,G,100, 5,G,12, 5,G]        |2.txt|2  |5,G       |3  |
+    |5  |[123]                            |2.txt|0  |123       |1  |
+    +---+---------------------------------+-----+---+----------+---+
+
+   see above: boundaries for sid (0,1), (1,2) are fine, (3,4), (4,5) must be fixed.
+
+Step-3: set up WinSpec based on fname and sid/pos and fix the boundary rows.
+        the method is similar to what we handle in https://stackoverflow.com/q/64967300/9510729
+        by using lag + filter + union:
+
+    w1 = Window.partitionBy('fname').orderBy('sid', 'pos')
+
+    df2 = df1.filter('pos in (0, cnt-1)') \
+        .withColumn('col', F.concat_ws(',', F.lag('col').over(w1), 'col')) \
+        .filter('pos=0') \
+        .withColumn('col', F.explode(split_rows('col')))
+
+    df2.orderBy('sid','pos').show(truncate=False)
+    +---+---------------------------------+-----+---+-------+---+                   
+    |sid|value                            |fname|pos|col    |cnt|
+    +---+---------------------------------+-----+---+-------+---+
+    |0  |[1,A,97, 1,A,98, 1,A,99, 2,B,100]|1.txt|0  |1,A,97 |4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|0  |2,B,100|4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|0  |2,B,95 |4  |
+    |2  |[]                               |1.txt|0  |3,C,10 |1  |
+    |3  |[4,D,8, 4,F,100, 4,F,23, 4,G]    |2.txt|0  |4,D,8  |4  |
+    |4  |[20,5,G,100, 5,G,12, 5,G]        |2.txt|0  |4,G,20 |3  |
+    |4  |[20,5,G,100, 5,G,12, 5,G]        |2.txt|0  |5,G,100|3  |
+    |5  |[123]                            |2.txt|0  |5,G,123|1  |
+    +---+---------------------------------+-----+---+-------+---+
+
+    df_new = df1.filter('pos not in (0,cnt-1)').union(df2)
+    
+    df_new.orderBy('sid','pos').show(truncate=False)
+    +---+---------------------------------+-----+---+-------+---+                   
+    |sid|value                            |fname|pos|col    |cnt|
+    +---+---------------------------------+-----+---+-------+---+
+    |0  |[1,A,97, 1,A,98, 1,A,99, 2,B,100]|1.txt|0  |1,A,97 |4  |
+    |0  |[1,A,97, 1,A,98, 1,A,99, 2,B,100]|1.txt|1  |1,A,98 |4  |
+    |0  |[1,A,97, 1,A,98, 1,A,99, 2,B,100]|1.txt|2  |1,A,99 |4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|0  |2,B,100|4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|0  |2,B,95 |4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|1  |2,B,3  |4  |
+    |1  |[2,B,95, 2,B,3, 3,C,100, 3,C,10] |1.txt|2  |3,C,100|4  |
+    |2  |[]                               |1.txt|0  |3,C,10 |1  |
+    |3  |[4,D,8, 4,F,100, 4,F,23, 4,G]    |2.txt|0  |4,D,8  |4  |
+    |3  |[4,D,8, 4,F,100, 4,F,23, 4,G]    |2.txt|1  |4,F,100|4  |
+    |3  |[4,D,8, 4,F,100, 4,F,23, 4,G]    |2.txt|2  |4,F,23 |4  |
+    |4  |[20,5,G,100, 5,G,12, 5,G]        |2.txt|0  |4,G,20 |3  |
+    |4  |[20,5,G,100, 5,G,12, 5,G]        |2.txt|0  |5,G,100|3  |
+    |4  |[20,5,G,100, 5,G,12, 5,G]        |2.txt|1  |5,G,12 |3  |
+    |5  |[123]                            |2.txt|0  |5,G,123|1  |
+    +---+---------------------------------+-----+---+-------+---+
+
+
