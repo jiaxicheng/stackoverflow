@@ -113,3 +113,39 @@ Example-4:
     |  null|          kijipiadoa|  null|
     +------+--------------------+------+
 
+
+Example-5: set schema `nullable = true`
+  REF: https://stackoverflow.com/q/65472284/9510729
+  Method: use `nullif(..., null)` 
+
+    import org.apache.spark.sql.types._
+
+    j1 = """{"ID": "500", "Data": [{"field2": 308, "field3": 346, "field1": 40.36582609126494, "field7": 3, "field4": 1583057346.0, "field5": -80.03243596528726, "field6": 16.0517578125, "field8": 5}, {"field2": 307, "field3": 348, "field1": 40.36591421686625, "field7": 3, "field4": 1583057347.0, "field5": -80.03259684675493, "field6": 16.234375, "field8": 5}]}"""
+
+    val df = spark.read.json(spark.sparkContext.parallelize(Seq(j1)))
+
+    df.selectExpr("struct(transform(Data, x -> (ID, x.field4 as f2, x.field5 as f3))) as New_Data").printSchema
+    root
+     |-- New_Data: struct (nullable = false)
+     |    |-- col1: array (nullable = true)
+     |    |    |-- element: struct (containsNull = false)
+     |    |    |    |-- ID: string (nullable = true)
+     |    |    |    |-- f2: double (nullable = true)
+     |    |    |    |-- f3: double (nullable = true)
+
+
+    df.selectExpr("nullif(struct(transform(Data, x -> (ID, x.field4 as f2, x.field5 as f3))),null) as New_Data").printSchema
+    root
+     |-- New_Data: struct (nullable = true)
+     |    |-- col1: array (nullable = true)
+     |    |    |-- element: struct (containsNull = false)
+     |    |    |    |-- ID: string (nullable = true)
+     |    |    |    |-- f2: double (nullable = true)
+     |    |    |    |-- f3: double (nullable = true)
+
+
+  As a side-note, it might be more efficient to use the following SQL expression `if(true,expr,null)`, 
+  since `nullif(expr,null)` might evalute expr twice which is kind of overhead.
+
+    if(true,struct(transform(Data, x -> (ID, x.field4 as f2, x.field5 as f3))),null) as New_Data
+
