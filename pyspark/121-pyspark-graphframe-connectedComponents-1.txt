@@ -24,6 +24,8 @@ Example-0: Use GraphFrame to collect all linked devices/accounts and group them 
   
     # for small dataset, use a smaller spark.sql.shuffle.partitions  
     spark.conf.set('spark.sql.shuffle.partitions', 5)
+
+  Method-1: use some tricks
     
     edges = df.withColumn('Device-Id', expr('concat("_", `Device-Id`)')).toDF('src', 'dst')
     vertices = edges.selectExpr('src as id').distinct().union(edges.select('dst').distinct())
@@ -50,6 +52,34 @@ Example-0: Use GraphFrame to collect all linked devices/accounts and group them 
     |[d1, d3, d2]|[a4, a1, a3, a5, a2]|   85899345920|
     |        [d4]|                [a6]|  309237645312|
     +------------+--------------------+--------------+
+
+  Method-2: use self-join to create edges:
+
+    edges = df.alias('d1').join(df.alias('d2'), ["Account-Id"]) \
+        .filter("d1.`Device-Id` > d2.`Device-Id`") \
+        .toDF("account", "src", "dst")
+    +-------+---+---+
+    |account|src|dst|
+    +-------+---+---+
+    |     a1| d2| d1|
+    |     a4| d3| d1|
+    +-------+---+---+
+
+    vertices = df.selectExpr('`Device-Id` as id', "`Account-Id` as acct_id")
+    g = GraphFrame(vertices, edges)
+    
+    df1 = g.connectedComponents() \
+        .groupby('component') \
+        .agg(
+           collect_set('id').alias('Device-Ids'),
+           collect_set('acct_id').alias('Account-Ids')
+         )
+    +---------+------------+--------------------+
+    |component|  Device-Ids|         Account-Ids|
+    +---------+------------+--------------------+
+    |        0|[d1, d2, d3]|[a4, a1, a3, a5, a2]|
+    |        1|        [d4]|                [a6]|
+    +---------+------------+--------------------+
 
   **Notes:**
   1. download the jar file from: https://spark-packages.org/package/graphframes/graphframes
@@ -85,4 +115,76 @@ Example-7: groupby related items and do the aggregated sum:
     |      [z, t]|           7|
     +------------+------------+
 
+
+Example-8: using self-join to create edges
+  REF: https://stackoverflow.com/questions/65483515/how-to-create-edge-list-from-spark-data-frame-in-pyspark
+  Method: the method used in example-0 can be very low efficient which leads to a huge edges list, doing a self join
+       could significantly reduce the list of both edges and vertices.
+       Below list code for both methods, and method-2 is preferred.
+  Code:
+
+    from graphframes import GraphFrame
+
+    df = spark.createDataFrame([
+        ('0', '123', 'james st'), ('1', '177', 'avenue st'), ('2', '123', 'spring st'), 
+        ('3', '999', 'avenue st'), ('4', '678', '5th ave'), ('5', '123', 'avenue st') 
+    ], ['id', 'phone', 'address'])
+
+    spark.sparkContext.setCheckpointDir("/tmp/222")
+    # below only for testing as the default 200 is taking time on small dataset
+    spark.conf.set("spark.sql.shuffle.partitions", 3)
+
+  Method-1: same as example-0, but clearly low efficient.
+
+    edges = df.selectExpr('id', "explode(array('_'||phone, '__'||address))").toDF('src', 'dst')
+    vertices = edges.selectExpr('explode(array(src,dst)) as id').distinct()
+
+    g = GraphFrame(vertices, edges)
+    df1 = g.connectedComponents()
+
+    df1.filter("left(id,1) != '_'").show(30)
+    +---+---------+
+    | id|component|
+    +---+---------+
+    |  0|        0|
+    |  1|        0|
+    |  4|        2|
+    |  5|        0|
+    |  3|        0|
+    |  2|        0|
+    +---+---------+
+
+  Method-2: using self-join to create edges list:
+
+    edges = df.alias('d1').join(df.alias('d2'), ["phone"]).filter("d1.id > d2.id") \
+        .selectExpr("'phone' as group", "d1.id as src", "d2.id as dst") \
+      .union(df.alias('d1').join(df.alias('d2'), ["address"]).filter("d1.id > d2.id") \
+        .selectExpr("'address' as group", "d1.id as src", "d2.id as dst"))
+    +-------+---+---+
+    |  group|src|dst|
+    +-------+---+---+
+    |  phone|  2|  0|
+    |  phone|  5|  2|
+    |  phone|  5|  0|
+    |address|  3|  1|
+    |address|  5|  3|
+    |address|  5|  1|
+    +-------+---+---+
+
+    vertices = df.select('id').distinct()
+
+    g = GraphFrame(vertices, edges)
+    df1 = g.connectedComponents()
+
+    df1.show()
+    +---+---------+
+    | id|component|
+    +---+---------+
+    |  0|        0|
+    |  1|        0|
+    |  4|        2|
+    |  5|        0|
+    |  3|        0|
+    |  2|        0|
+    +---+---------+
 
