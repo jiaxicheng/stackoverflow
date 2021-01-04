@@ -1,5 +1,7 @@
 SparkSQL String Manipulation functions:
 
+including: string, substring_index, substr, left, right, trim, lpad, locate, instr, translate, 
+           repeat, concat, concat_ws, regexp_extract, regexp_replace
 
 ---
 Example-1: mask-replace-inner-part-of-string-column-in-pyspark
@@ -114,8 +116,6 @@ Example-2: map values read from one column
     +-------+----+-------+
 
 
-
-
 Example-3: use regexp_extract to retrieve values of supplied keys and their aliases:
   REF: https://stackoverflow.com/a/64704947/9510729
   Code:
@@ -158,5 +158,42 @@ Example-3: use regexp_extract to retrieve values of supplied keys and their alia
 
     key_ptns = [ (k, '|'.join(sorted([k]+key_aliases[k],key=len,reverse=True)) if k in key_aliases else k) for k in keys ]
 
- 
+
+
+Example-4: check if a column is String/Array and return values accordingly
+  REF: https://stackoverflow.com/q/65456506/9510729
+
+    df = spark.createDataFrame([
+        ('ABC', 1, ["AB"]), 
+        ('XYZ', 2, ["XY", "YZ"]),
+        ('DEF', 5, ["DE", "EF", "FG"])
+    ], ['name', 'id', 'recs'])
+
+    df.createOrReplaceTempView('tbl')
+
+    x = 'name'
+
+    setx = lambda col: spark.sql(f"""
+        SELECT *, 
+          IF(concat_ws('\0', `{col}`) = string(`{col}`), id, substring_index(concat_ws('\0', `{col}`), '\0', 1)) as new
+        FROM tbl """)
+
+    setx('name').show()
+    +----+---+------------+---+                                                     
+    |name| id|        recs|new|
+    +----+---+------------+---+
+    | ABC|  1|        [AB]|  1|
+    | XYZ|  2|    [XY, YZ]|  2|
+    | DEF|  5|[DE, EF, FG]|  5|
+    +----+---+------------+---+
+
+    setx('recs').show()
+    +----+---+------------+---+
+    |name| id|        recs|new|
+    +----+---+------------+---+
+    | ABC|  1|        [AB]| AB|
+    | XYZ|  2|    [XY, YZ]| XY|
+    | DEF|  5|[DE, EF, FG]| DE|
+    +----+---+------------+---+
+
 
