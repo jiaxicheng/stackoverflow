@@ -1,0 +1,95 @@
+Task: Given a big list of regexp patterns, try to find matches from multiple columns:
+REF: https://stackoverflow.com/questions/65744592/matching-multiple-regexes-in-a-pyspark-dataframe
+Similiar post: https://stackoverflow.com/a/63512738/9510729
+Method: 
+  (1) use broadcast to keywords either with join or values only
+  (2) use combined search columns instead of a list of `OR` condition to find the matches
+  (3) lower-case the column values/patterns to skip case-insensitive matching which is slow
+
+    from pyspark.sql import Row
+    import re
+
+    df = spark.createDataFrame([
+        ('USA', 'PyCon happens annually in the United States, with satellite events in India, Brazil and Tokyo'),
+        ('Canada', 'The annual hockey championship has some events occurring in the US')
+    ], ["primary_loc", "description"])
+
+    keywords = {
+        'united states': re.compile(r'\b(usa|us|united states|texas|washington|new york)\b', re.I),
+        'india': re.compile(r'\b(india|bangalore|mumbai|delhi)\b', re.I),
+        'canada': re.compile(r'\b(canada|winnipeg|toronto|ontario|vancouver)\b', re.I),
+        'japan': re.compile(r'\b(japan|tokyo|kyoto)\b', re.I)
+    }
+
+ Method-1: use broadcast join to avoid the cartesian-product of two joined dataframes:
+
+    from pyspark.sql.functions import broadcast, expr
+
+    # notice require more robust pattern if there are anchors like \A, \Z in the pattern
+    # see post: https://stackoverflow.com/a/63512738/9510729
+    df_ptn = spark.createDataFrame([ (k,v.pattern.lower()) for k,v in keywords.items() ], ['country', 'ptn'])
+
+    df_new = df.join(broadcast(df_ptn), expr("lower(concat_ws('\0', description, primary_loc)) rlike ptn")).drop('ptn')
+    +--------------------+-----------+-------------+
+    |         description|primary_loc|      country|
+    +--------------------+-----------+-------------+
+    |PyCon happens ann...|        USA|united states|
+    |PyCon happens ann...|        USA|        india|
+    |PyCon happens ann...|        USA|        japan|
+    |The annual hockey...|     Canada|united states|
+    |The annual hockey...|     Canada|       canada|
+    +--------------------+-----------+-------------+
+
+
+(2) use pandas_udf
+
+    from pyspark.sql.functions import pandas_udf, explode, concat_ws
+    from pandas import Series
+    import re
+    from pyspark.broadcast import Broadcast
+
+    # broadcast the key_words and send them to executors
+    ptns = spark.sparkContext.broadcast(keywords)
+
+    # no need to take care of NULL values since concat_ws always returns non-NULL
+    def _get_countries(col:Series, ptn:Broadcast) -> Series:
+        return Series([ [k for k,v in ptn.value.items() if re.search(v,x)] for x in col ])
+
+    get_countries = pandas_udf(lambda col:_get_countries(col, ptns), "array<string>")
+
+    df.select("*", explode(get_countries(concat_ws('\0','primary_loc','description'))).alias('country')).show()
+    +--------------------+-----------+-------------+
+    |         description|primary_loc|      country|
+    +--------------------+-----------+-------------+
+    |PyCon happens ann...|        USA|united states|
+    |PyCon happens ann...|        USA|        india|
+    |PyCon happens ann...|        USA|        japan|
+    |The annual hockey...|     Canada|united states|
+    |The annual hockey...|     Canada|       canada|
+    +--------------------+-----------+-------------+
+
+
+(3) use for-loop to iterate through each key in keywords, each key will generate a column and then normalize 
+    the resulting intermediate dataframe using array + concat_ws + split + explode:
+
+    from pyspark.sql.functions import when, concat_ws, lit, explode, split, array, lower
+
+        def get_countries(_df, ptn):
+           cols = _df.columns
+           for k,v in ptn.items():
+             _df = _df.withColumn(k, when(lower(concat_ws('\0','primary_loc','description')).rlike(v),lit(k)))
+           return _df.select(*cols, explode(split(concat_ws('\0',array(*ptn.keys())),'\0')).alias('country'))
+
+    ptns = { k:v.pattern.lower() for k,v in keywords.items() }
+
+    get_countries(df, ptns).show(truncate=False)
+    +---------------------------------------------------------------------------------------------+-----------+-------------+
+    |description                                                                                  |primary_loc|country      |
+    +---------------------------------------------------------------------------------------------+-----------+-------------+
+    |PyCon happens annually in the United States, with satellite events in India, Brazil and Tokyo|USA        |united states|
+    |PyCon happens annually in the United States, with satellite events in India, Brazil and Tokyo|USA        |india        |
+    |PyCon happens annually in the United States, with satellite events in India, Brazil and Tokyo|USA        |japan        |
+    |The annual hockey championship has some events occurring in the US                           |Canada     |united states|
+    |The annual hockey championship has some events occurring in the US                           |Canada     |canada       |
+    +---------------------------------------------------------------------------------------------+-----------+-------------+
+
