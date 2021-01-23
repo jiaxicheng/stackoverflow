@@ -387,4 +387,60 @@ Example-7: use sequence to take N-gram of an ArrayType column:
 
 
 
+Example-8: Aggreate rows into time-buckets
+  REF: https://stackoverflow.com/q/65851104/9510729
+  Method: see comments in code
+
+    df = spark.createDataFrame([
+        ('2019-05-10 14:30:00', '2019-05-10 16:02:00', 'sensor_1'), 
+        ('2019-05-11 17:30:00', '2019-05-11 17:35:00', 'sensor_2'), 
+        ('2019-05-11 17:40:00', '2019-05-11 17:50:00', 'sensor_2') 
+    ], ['from_timestamp', 'to_timestamp', 'sensor_uuid'])
+
+    # covnert two columns into TimestampType
+    df = df.withColumn('from_timestamp', F.to_timestamp('from_timestamp')) \
+        .withColumn('to_timestamp', F.to_timestamp('to_timestamp'))
+
+    # truncate from_timestamp and to_timestamp to HOUR and then use them to create 
+    # a sequence with step=interval 1 hours
+    # transform the array elements into a struct<start:timestamp,end:timestamp,bucket_end_time:timestamp>
+    # and explode the array of structs
+    df1 = df.selectExpr(
+        "sensor_uuid", 
+        """
+          inline(
+            transform(
+              sequence(date_trunc('hour',from_timestamp), date_trunc('hour',to_timestamp), interval 1 hours), 
+              x -> struct(
+                greatest(x, from_timestamp) as start, 
+                least(x+interval 3599 seconds, to_timestamp) as end, 
+                x + interval 1 hours as bucket_end_time)
+             )
+           )""")
+    
+    df1.show(truncate=False)
+    +-----------+-------------------+-------------------+-------------------+
+    |sensor_uuid|start              |end                |bucket_end_time    |
+    +-----------+-------------------+-------------------+-------------------+
+    |sensor_1   |2019-05-10 14:30:00|2019-05-10 14:59:59|2019-05-10 15:00:00|
+    |sensor_1   |2019-05-10 15:00:00|2019-05-10 15:59:59|2019-05-10 16:00:00|
+    |sensor_1   |2019-05-10 16:00:00|2019-05-10 16:02:00|2019-05-10 17:00:00|
+    |sensor_2   |2019-05-11 17:30:00|2019-05-11 17:35:00|2019-05-11 18:00:00|
+    |sensor_2   |2019-05-11 17:40:00|2019-05-11 17:50:00|2019-05-11 18:00:00|
+    +-----------+-------------------+-------------------+-------------------+
+    
+    # groupby sensor_uuid and bucket_end_time and then calculate bucket_use_time
+    df1.groupby('sensor_uuid', 'bucket_end_time') \
+        .agg(F.expr("sum(unix_timestamp(end)-unix_timestamp(start)+1) as bucket_use_time")) \
+        .show()
+    +-----------+-------------------+---------------+                               
+    |sensor_uuid|    bucket_end_time|bucket_use_time|
+    +-----------+-------------------+---------------+
+    |   sensor_2|2019-05-11 18:00:00|            902|
+    |   sensor_1|2019-05-10 15:00:00|           1800|
+    |   sensor_1|2019-05-10 17:00:00|            121|
+    |   sensor_1|2019-05-10 16:00:00|           3600|
+    +-----------+-------------------+---------------+
+    
+    
 
