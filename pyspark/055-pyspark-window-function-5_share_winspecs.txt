@@ -1,0 +1,174 @@
+Some notes regarding using select or withColumn to multiple Window aggregate functions sharing the same WinSpecs:
+REF: https://stackoverflow.com/q/65473373/9510729
+
+---
+Notes: 
+(1) When multiple aggregate functions have the same WindowSpec, try using column-name instead of expression
+   for `partitionBy()` and `orderBy()` methods. Spark internally will share the same WindSpec when using the 
+   column-name
+
+(2) Using select + list-comprehension is more efficient than using withColumn method. SparkSQL internally 
+   set each withColumn into subquery but does merge some consecutive withColumns into the same sub-query.
+   the following aggregation functions can be merged into one subquery: 
+
+      sum, max, min, mean, first, last, approx_count_distinct, count, collect_list, collect_set
+
+   so they should be specify close to each other whenever possible. The following functions will break the 
+   WindowSpec on their own: 
+
+      stddev/stddev_pop/stddev_samp, variance/var_pop/var_samp, kurtosis, skewness
+
+   so these should be put to the end of the withColumn method chain. 
+
+(3) order of the withColumn method matters, and for Window aggregate function sharing the same specs,
+    try to use select+list_comprehension which can lead to performant improvement.
+
+Example:
+
+    from pyspark.sql import Window, functions as F
+
+    df = spark.createDataFrame([
+        ('2020-12-20 17:45:19.536796', '1', 5), 
+        ('2020-12-21 17:45:19.53683', '1', 105), 
+        ('2020-12-22 17:45:19.536846', '1', 205), 
+        ('2020-12-23 17:45:19.536861', '1', 305), 
+        ('2020-12-24 17:45:19.536875', '1', 405), 
+        ('2020-12-25 17:45:19.536891', '1', 505), 
+        ('2020-12-26 17:45:19.536906', '1', 605), 
+        ('2020-12-20 17:45:19.536796', '2', 10), 
+        ('2020-12-21 17:45:19.53683', '2', 110), 
+        ('2020-12-22 17:45:19.536846', '2', 210), 
+        ('2020-12-23 17:45:19.536861', '2', 310), 
+        ('2020-12-24 17:45:19.536875', '2', 410), 
+        ('2020-12-25 17:45:19.536891', '2', 510), 
+        ('2020-12-26 17:45:19.536906', '2', 610), 
+        ('2020-12-20 17:45:19.536796', '3', 15), 
+        ('2020-12-21 17:45:19.53683', '3', 115), 
+        ('2020-12-22 17:45:19.536846', '3', 215)
+    ], ['date', 'name', 'value'])
+
+    aggregate_funcs = ['sum', 'max', 'min', 'mean', 'stddev']
+
+It's important how to specify WindowSpec, try not to use expressions in `partitionBy` and/or `orderBy` clause:
+Below we have w1 and w2, where we specify orderBy by column-name(w1) or an expression(w2):
+
+    w1 = Window.partitionBy('name').orderBy('dt').rangeBetween(-2*3600*24,0)
+    w2 = Window.partitionBy('name').orderBy(F.col('date').cast('timestamp').cast('long')).rangeBetween(-2*3600*24,0)
+
+
+Method-1: using select + list comprehension:
+
+  1.1 Using `w1`, we have all calculations shared the same WindowSpec
+
+    df1 = df.withColumn('dt', F.col('date').cast('timestamp').cast('long')) \
+        .select(df.columns + [ F.expr(f"{f}(value)").over(w1).alias(f) for f in aggregate_funcs])
+    df1.explain()
+    == Physical Plan ==
+    *(3) Project [date#556, name#1, value#2L, ldate#461, sum#2307L, max#2308L, min#2309L, mean#2310, stddev#2311]
+    +- Window [sum(value#2L) windowspecdefinition(name#1, dt#2301L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS sum#2307L, max(value#2L) windowspecdefinition(name#1, dt#2301L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS max#2308L, min(value#2L) windowspecdefinition(name#1, dt#2301L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS min#2309L, avg(value#2L) windowspecdefinition(name#1, dt#2301L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS mean#2310, stddev_samp(_w1#2333) windowspecdefinition(name#1, dt#2301L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS stddev#2311], [name#1], [dt#2301L ASC NULLS FIRST]
+       +- *(2) Sort [name#1 ASC NULLS FIRST, dt#2301L ASC NULLS FIRST], false, 0
+          +- Exchange hashpartitioning(name#1, 200)
+             +- *(1) Project [cast(date#0 as timestamp) AS date#556, name#1, value#2L, cast(cast(date#0 as timestamp) as double) AS ldate#461, cast(cast(date#0 as timestamp) as bigint) AS dt#2301L, cast(value#2L as double) AS _w1#2333]
+                +- Scan ExistingRDD[date#0,name#1,value#2L]
+
+  1.2 Using `w2`, each aggregation uses its own WindowSpec, this will be rather low efficient
+
+    df2 = df.select(df.columns + [ F.expr(f"{f}(value)").over(w2).alias(f) for f in aggregate_funcs])
+    df2.explain()
+    == Physical Plan ==
+    *(7) Project [date#556, name#1, value#2L, ldate#461, sum#2351L, max#2352L, min#2353L, mean#2354, stddev#2355]
+    +- Window [stddev_samp(_w4#2381) windowspecdefinition(name#1, _w5#2390L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS stddev#2355], [name#1], [_w5#2390L ASC NULLS FIRST]
+       +- *(6) Sort [name#1 ASC NULLS FIRST, _w5#2390L ASC NULLS FIRST], false, 0
+          +- *(6) Project [date#556, name#1, value#2L, ldate#461, _w4#2381, _w5#2390L, max#2352L, min#2353L, mean#2354, sum#2351L]
+             +- Window [sum(value#2L) windowspecdefinition(name#1, _w0#2377L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS sum#2351L], [name#1], [_w0#2377L ASC NULLS FIRST]
+                +- *(5) Sort [name#1 ASC NULLS FIRST, _w0#2377L ASC NULLS FIRST], false, 0
+                   +- *(5) Project [date#556, name#1, value#2L, ldate#461, _w0#2377L, _w4#2381, _w5#2390L, max#2352L, min#2353L, mean#2354]
+                      +- Window [avg(value#2L) windowspecdefinition(name#1, _w3#2380L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS mean#2354], [name#1], [_w3#2380L ASC NULLS FIRST]
+                         +- *(4) Sort [name#1 ASC NULLS FIRST, _w3#2380L ASC NULLS FIRST], false, 0
+                            +- *(4) Project [date#556, name#1, value#2L, ldate#461, _w0#2377L, _w3#2380L, _w4#2381, _w5#2390L, max#2352L, min#2353L]
+                               +- Window [min(value#2L) windowspecdefinition(name#1, _w2#2379L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS min#2353L], [name#1], [_w2#2379L ASC NULLS FIRST]
+                                  +- *(3) Sort [name#1 ASC NULLS FIRST, _w2#2379L ASC NULLS FIRST], false, 0
+                                     +- *(3) Project [date#556, name#1, value#2L, ldate#461, _w0#2377L, _w2#2379L, _w3#2380L, _w4#2381, _w5#2390L, max#2352L]
+                                        +- Window [max(value#2L) windowspecdefinition(name#1, _w1#2378L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS max#2352L], [name#1], [_w1#2378L ASC NULLS FIRST]
+                                           +- *(2) Sort [name#1 ASC NULLS FIRST, _w1#2378L ASC NULLS FIRST], false, 0
+                                              +- Exchange hashpartitioning(name#1, 200)
+                                                 +- *(1) Project [cast(date#0 as timestamp) AS date#556, name#1, value#2L, cast(cast(date#0 as timestamp) as double) AS ldate#461, cast(cast(date#0 as timestamp) as bigint) AS _w0#2377L, cast(cast(date#0 as timestamp) as bigint) AS _w1#2378L, cast(cast(date#0 as timestamp) as bigint) AS _w2#2379L, cast(cast(date#0 as timestamp) as bigint) AS _w3#2380L, cast(value#2L as double) AS _w4#2381, cast(cast(date#0 as timestamp) as bigint) AS _w5#2390L]
+                                                    +- Scan ExistingRDD[date#0,name#1,value#2L]
+
+
+Method-2: using withColumn, Spark engine will internally optimize the query plan, when we use `w2`, the result is the same as using select + list comprehension, each aggregation is on its own WindSpec. when using w1, the order of the withColumn method matters, see:
+
+    df3 = df.withColumn('dt', F.col('date').cast('timestamp').cast('long')) \
+        .withColumn('sum', F.sum('value').over(w1)) \
+        .withColumn('max', F.max('value').over(w1)) \
+        .withColumn('min', F.min('value').over(w1)) \
+        .withColumn('mean', F.mean('value').over(w1)) \
+        .withColumn('stddev', F.stddev('value').over(w1))
+
+    df3.explain()           <---- 2 Window Specs
+    == Physical Plan ==
+    *(4) Project [date#556, name#1, value#2L, ldate#461, dt#3474L, sum#3481L, max#3489L, min#3498L, mean#3508, stddev#3527]
+    +- Window [stddev_samp(_w0#3544) windowspecdefinition(name#1, dt#3474L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS stddev#3527], [name#1], [dt#3474L ASC NULLS FIRST]
+       +- *(3) Project [date#556, name#1, value#2L, ldate#461, dt#3474L, sum#3481L, max#3489L, min#3498L, mean#3508, cast(value#2L as double) AS _w0#3544]
+          +- Window [sum(value#2L) windowspecdefinition(name#1, dt#3474L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS sum#3481L, max(value#2L) windowspecdefinition(name#1, dt#3474L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS max#3489L, min(value#2L) windowspecdefinition(name#1, dt#3474L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS min#3498L, avg(value#2L) windowspecdefinition(name#1, dt#3474L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS mean#3508], [name#1], [dt#3474L ASC NULLS FIRST]
+             +- *(2) Sort [name#1 ASC NULLS FIRST, dt#3474L ASC NULLS FIRST], false, 0
+                +- Exchange hashpartitioning(name#1, 200)
+                   +- *(1) Project [cast(date#0 as timestamp) AS date#556, name#1, value#2L, cast(cast(date#0 as timestamp) as double) AS ldate#461, cast(cast(date#0 as timestamp) as bigint) AS dt#3474L]
+                      +- Scan ExistingRDD[date#0,name#1,value#2L]
+
+
+    df4 = df.withColumn('dt', F.col('date').cast('timestamp').cast('long')) \
+        .withColumn('sum', F.sum('value').over(w1)) \
+        .withColumn('mean', F.mean('value').over(w1)) \
+        .withColumn('stddev', F.stddev('value').over(w1)) \
+        .withColumn('max', F.max('value').over(w1)) \
+        .withColumn('min', F.min('value').over(w1)) 
+
+    df4.explain()    <-- 3 WindowSpecs
+    == Physical Plan ==
+    Window [max(value#2L) windowspecdefinition(name#1, dt#3563L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS max#3630L, min(value#2L) windowspecdefinition(name#1, dt#3563L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS min#3641L], [name#1], [dt#3563L ASC NULLS FIRST]
+    +- *(4) Project [date#556, name#1, value#2L, ldate#461, dt#3563L, sum#3570L, mean#3578, stddev#3595]
+       +- Window [stddev_samp(_w0#3612) windowspecdefinition(name#1, dt#3563L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS stddev#3595], [name#1], [dt#3563L ASC NULLS FIRST]
+          +- *(3) Project [date#556, name#1, value#2L, ldate#461, dt#3563L, sum#3570L, mean#3578, cast(value#2L as double) AS _w0#3612]
+             +- Window [sum(value#2L) windowspecdefinition(name#1, dt#3563L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS sum#3570L, avg(value#2L) windowspecdefinition(name#1, dt#3563L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS mean#3578], [name#1], [dt#3563L ASC NULLS FIRST]
+                +- *(2) Sort [name#1 ASC NULLS FIRST, dt#3563L ASC NULLS FIRST], false, 0
+                   +- Exchange hashpartitioning(name#1, 200)
+                      +- *(1) Project [cast(date#0 as timestamp) AS date#556, name#1, value#2L, cast(cast(date#0 as timestamp) as double) AS ldate#461, cast(cast(date#0 as timestamp) as bigint) AS dt#3563L]
+                         +- Scan ExistingRDD[date#0,name#1,value#2L]
+
+
+Method-3: Using collect_list and having a single WindowSpec, and then do post-processing using aggregate function:
+
+    df5 = df.withColumn('value_array', F.collect_list('value').over(w2)) \
+        .withColumn('mean', F.expr("aggregate(value_array, 0L, (acc,x) -> acc+x, acc -> acc/size(value_array))")) \
+        .withColumn("dta", F.expr("""
+            aggregate(
+              value_array,
+              cast((0,NULL,NULL,0) as struct<sum:long,max:long,min:long,std_sum:long>),
+              (acc, x) -> struct(
+                acc.sum + x as sum,
+                greatest(acc.max, x) as max,
+                least(acc.min, x) as min,
+                /* below typec-casting is important */
+                acc.std_sum + bigint((x-mean)*(x-mean)) as std_sum
+              ),
+              acc -> struct(
+                acc.sum as sum, 
+                acc.max as max, 
+                acc.min as min, 
+                acc.sum/size(value_array) as mean,
+                sqrt(acc.std_sum/(size(value_array)-1)) as stddev
+              )
+            )
+        """)).select(*df.columns, 'dta.*')
+
+    df5.explain()
+    == Physical Plan ==
+    Project [da....
+    +- Window [collect_list(value#2L, 0, 0) windowspecdefinition(name#1, _w0#6334L ASC NULLS FIRST, specifiedwindowframe(RangeFrame, -172800, currentrow$())) AS value_array#6333], [name#1], [_w0#6334L ASC NULLS FIRST]
+       +- *(2) Sort [name#1 ASC NULLS FIRST, _w0#6334L ASC NULLS FIRST], false, 0
+          +- Exchange hashpartitioning(name#1, 200)
+             +- *(1) Project [cast(date#0 as timestamp) AS date#556, name#1, value#2L, cast(cast(date#0 as timestamp) as bigint) AS _w0#6334L]
+                +- Scan ExistingRDD[date#0,name#1,value#2L]
+
+
