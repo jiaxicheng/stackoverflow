@@ -172,3 +172,42 @@ Method-3: Using collect_list and having a single WindowSpec, and then do post-pr
                 +- Scan ExistingRDD[date#0,name#1,value#2L]
 
 
+Note: using SQL syntax directly with SparkSQL, the result is the same:
+
+(1) below is slow since the ORDER BY is an expression `CAST(date AS timestamp)`
+
+    sql_example = spark.sql(""" 
+        SELECT *
+            , sum(value) OVER (w2) as sum
+            , mean(value) OVER (w2) as mean
+            , min(value) OVER (w2) as min
+            , max(value) OVER (w2) as max
+            , stddev(value) OVER (w2) AS stddev
+        FROM df
+        WINDOW w2 as (
+            PARTITION BY name
+            ORDER BY CAST(date AS timestamp) 
+            RANGE BETWEEN INTERVAL 7 DAYS PRECEDING AND CURRENT ROW
+        )
+    """) 
+
+(2) below using sub-query to type-cast date and then use `ORDER BY date` in WindSpec,
+    this will improve the performance by sharing the WinSpec for all caggregate functions
+    in the select_list:
+
+    sql_example = spark.sql(""" 
+        SELECT *
+            , sum(value) OVER (w2) as sum
+            , mean(value) OVER (w2) as mean
+            , min(value) OVER (w2) as min
+            , max(value) OVER (w2) as max
+            , stddev(value) OVER (w2) AS stddev
+        FROM (select CAST(date AS timestamp) as date, name, value from df) as d
+        WINDOW w2 as (
+            PARTITION BY name
+            ORDER BY date 
+            RANGE BETWEEN INTERVAL 7 DAYS PRECEDING AND CURRENT ROW
+        )
+    """) 
+
+
