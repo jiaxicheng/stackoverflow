@@ -1,0 +1,66 @@
+use Map:
+
+
+---
+Example-6: use Map to convert a long SQL statement using case/when:
+  REF: https://stackoverflow.com/q/65786478/9510729
+  Target: given a dict, to label a column based on the existing of any dict.keys(), when using `case/when`
+      statement, the order of matching matters and one row can has at most 1 match:
+  Method: use regexp_extract and Map
+    (1) regexp pattern can make sure the order of matching
+    (2) use Map to make sure at most one match
+  Code:
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([('sdasdasdasd','bob'),('_CMN_BD','arshad'),('_LNS_CMN_WS','jimmy')]) \
+        .toDF('input_file_name','feed_name')
+
+    product_code = ['%CMN%', '%TP%', '%LNS%']
+    product_name = ['Cash and Due', 'Trade Product', 'Corp Loans']
+
+    # create Map using product_code vs product_name (strip the leading/trailing %)
+    map1 = F.create_map(*[F.lit(e) for c,n in zip(product_code,product_name) for e in [c.strip('%'),n]])
+
+    # create regexp pattern for regexp_extract function
+    ptn = '({})'.format('|'.join(p.strip('%') for p in product_code))
+
+    # use coalesce to fill the null for non-matched rows
+    df.withColumn('product', F.coalesce(map1[F.regexp_extract('input_file_name',ptn,1)],'feed_name')).show()
+    +---------------+---------+------------+
+    |input_file_name|feed_name|     product|
+    +---------------+---------+------------+
+    |    sdasdasdasd|      bob|         bob|
+    |        _CMN_BD|   arshad|Cash and Due|
+    |    _LNS_CMN_WS|    jimmy|  Corp Loans|
+    +---------------+---------+------------+
+
+ 
+Task-2: replace all sub-strings inside an StringType column based on a dict:
+
+    # dict for a mapping
+    product_mapping = {'CMN':'Cash and Due', 'TP':'Trade Product', 'LNS':'Corp Loans'}
+    # create MapType column map1
+    map1 = F.create_map(*[F.lit(e) for k,v in product_mapping.items() for e in [k,v]])
+    # get the pattern from the dict.keys()
+    ptn = r'(?i)\b({})\b'.format('|'.join(product_mapping.keys()))
+
+    # split the String into an array so that all matched sub-strings on their own array elements
+    # iterate through the array using transform and then map matched into their corresponding  dict.values
+    # use concat_ws to convert array into String.
+    df_new = df.withColumn('arr', F.split(F.regexp_replace('input_file_name', ptn, '\0$1\0'), '\0+')) \
+        .withColumn('map1', map1) \
+        .selectExpr(
+          *df.columns, 
+          "concat_ws('',transform(arr, x -> coalesce(map1[upper(x)],x))) as product"
+        )
+     df_new.show(truncate=False)
+     +---------------+---------+---------------------------+
+     |input_file_name|feed_name|product                    |
+     +---------------+---------+---------------------------+
+     |sdasdasdasd    |bob      |sdasdasdasd                |
+     |_CMN_BD        |arshad   |_Cash and Due_BD           |
+     |_LNS_CMN_WS    |jimmy    |_Corp Loans_Cash and Due_WS|
+     +---------------+---------+---------------------------+
+
+
