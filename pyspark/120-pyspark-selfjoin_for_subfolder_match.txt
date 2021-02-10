@@ -1,0 +1,94 @@
+
+
+
+REF: https://stackoverflow.com/q/66127856/9510729
+Target: fill the NULL `Time stamp` using the max `Time stamp` from `File/Folder` under the corresponding folder 
+        and its sub-folders:
+Method: Using self-join to get aggregate(max timestamp) of folders using timestamps from files under the 
+        current and sub-folders.
+JOIN condition: using startswith is more reliable than LIKE and RLIKE (to avoid metachars in the filepaths):
+
+      F.concat("d1.current_folder",F.lit("/")).startswith(F.col("d2.current_folder"))
+
+  better than:
+
+      F.expr("d1.current_folder like d2.current_folder||'%'")
+      F.expr("d1.current_folder rlike '^'||d2.current_folder||'(?=/|$)'")
+
+
+    from pyspark.sql import functions as F
+
+    df = spark.createDataFrame([
+        ('/A', 'parent-Folder', 1, None), ('/A/B', 'sub-folder', 2, None), 
+        ('/A/B/1.txt', 'file', 3, '02-FEB-2021 8 PM'), ('/A/B/2.txt', 'file', 3, '02-FEB-2021 9 PM'), 
+        ('/A/C', 'sub-folder', 2, 'NULL'), ('/A/C/3.txt', 'file', 3, '02-FEB-2021 10 AM'), 
+        ('/A/C/4.txt', 'file', 3, '02-FEB-2021 11 AM')
+    ], ['File/Folder', 'Folder/File Ind', 'folder level ind', 'Time stamp'])
+    #df = spark.read.csv('/home/xicheng/test/join-10.txt', header=True, inferSchema=True, nullValue='NULL')
+
+    # convert `Time stamp` to TimestampType and find current_folder
+    df = df.withColumn('ts', F.to_timestamp('Time stamp', 'dd-MMM-yyyy h a')) \
+        .withColumn('current_folder', 
+            F.when(F.col('Folder/File Ind')=='file',F.regexp_replace('File/Folder', '/[^/]+$', ''))
+            .otherwise(F.col('File/Folder')))
+    df.show()
+    +-----------+---------------+----------------+-----------------+-------------------+--------------+
+    |File/Folder|Folder/File Ind|folder level ind|       Time stamp|                 ts|current_folder|
+    +-----------+---------------+----------------+-----------------+-------------------+--------------+
+    |         /A|  parent-Folder|               1|             null|               null|            /A|
+    |       /A/B|     sub-folder|               2|             null|               null|          /A/B|
+    | /A/B/1.txt|           file|               3| 02-FEB-2021 8 PM|2021-02-02 20:00:00|          /A/B|
+    | /A/B/2.txt|           file|               3| 02-FEB-2021 9 PM|2021-02-02 21:00:00|          /A/B|
+    |       /A/C|     sub-folder|               2|             NULL|               null|          /A/C|
+    | /A/C/3.txt|           file|               3|02-FEB-2021 10 AM|2021-02-02 10:00:00|          /A/C|
+    | /A/C/4.txt|           file|               3|02-FEB-2021 11 AM|2021-02-02 11:00:00|          /A/C|
+    +-----------+---------------+----------------+-----------------+-------------------+--------------+
+
+    # find max_ts for each folder: `current_folder`
+    df1 = df.groupby('current_folder').agg(F.max('ts').alias('max_ts'))
+    df1.orderBy('current_folder').show()
+    +--------------+-------------------+                                            
+    |current_folder|                 ts|
+    +--------------+-------------------+
+    |            /A|               null|
+    |          /A/B|2021-02-02 21:00:00|
+    |          /A/C|2021-02-02 11:00:00|
+    +--------------+-------------------+
+
+    # use self-join to get `max_ts` of each folder and its corresponding sub-folders
+    df2 = df1.alias('d1') \
+        .join(
+            df1.alias('d2'), 
+            F.concat("d1.current_folder",F.lit("/")).startswith(F.col("d2.current_folder"))) \
+        .groupby('d2.current_folder') \
+        .agg(F.max('d1.max_ts').alias('max_ts'))
+  
+    df2.orderBy('current_folder').show()
+    +--------------+-------------------+                                            
+    |current_folder|             max_ts|
+    +--------------+-------------------+
+    |            /A|2021-02-02 21:00:00|
+    |          /A/B|2021-02-02 21:00:00|
+    |          /A/C|2021-02-02 11:00:00|
+    +--------------+-------------------+
+
+    # join the resulting df2 with df and reset the missing Time stamp:
+    df_new = df.join(df2, "current_folder") \
+        .withColumn('Time stamp', F.coalesce('Time stamp', F.date_format('max_ts', 'dd-MMM-yyyy h a'))) 
+        .drop('ts','max_ts','current_folder')
+
+    df_new.orderBy('current_folder').show()
+    +--------------+-----------+---------------+----------------+-----------------+-----------------+
+    |current_folder|File/Folder|Folder/File Ind|folder level ind|       Time stamp|      Time stamp1|
+    +--------------+-----------+---------------+----------------+-----------------+-----------------+
+    |            /A|         /A|  parent-Folder|               1|             null| 02-Feb-2021 9 PM|
+    |          /A/B| /A/B/2.txt|           file|               3| 02-FEB-2021 9 PM| 02-FEB-2021 9 PM|
+    |          /A/B| /A/B/1.txt|           file|               3| 02-FEB-2021 8 PM| 02-FEB-2021 8 PM|
+    |          /A/B|       /A/B|     sub-folder|               2|             null| 02-Feb-2021 9 PM|
+    |          /A/C| /A/C/4.txt|           file|               3|02-FEB-2021 11 AM|02-FEB-2021 11 AM|
+    |          /A/C|       /A/C|     sub-folder|               2|             null|02-Feb-2021 11 AM|
+    |          /A/C| /A/C/3.txt|           file|               3|02-FEB-2021 10 AM|02-FEB-2021 10 AM|
+    +--------------+-----------+---------------+----------------+-----------------+-----------------+
+
+
+
