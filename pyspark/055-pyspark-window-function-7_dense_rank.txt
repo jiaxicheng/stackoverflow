@@ -1,0 +1,74 @@
+Using Window Aggregate functions:
+
+---
+Example-1: using dense_rank, row_number to create generic sequence number under groups.
+  REF: https://stackoverflow.com/questions/66528350/pyspark-convert-rows-to-columns
+  similar example: https://stackoverflow.com/questions/63160595
+  Task: to create pivot table for each Customer, taking `ID`, `unit` and `order` into columns
+        for all distinct IDs under the same Customer
+  MEthod: 
+    (1) use dense_rank to convert IDs into sequence ID `dr` starting from 1
+    (2) do the samilar but using row_number to `order` column under the same `Customer` and `ID`
+    (3) find the max dr as `N`, use `range(1,N+1)` to set list of pivot values
+
+    from pyspark.sql import Window, functions as F
+
+    df = createDataFrame([
+            ('John', '123', '00015', '1'), ('John', '123', '00016', '2'), ('John', '345', '00205', '3'), 
+            ('John', '345', '00206', '4'), ('John', '789', '00283', '5'), ('John', '789', '00284', '6'), 
+            ('John', '789', '00285', '7')
+        , ['Customer', 'ID', 'unit', 'order'])
+    
+    # WinSpec to get dense_rank of IDs over Customer
+    w1 = Window.partitionBy('Customer').orderBy('ID')
+    # WinSpec to get row_number of order under the same Customer and ID
+    w2 = Window.partitionBy('Customer','ID').orderBy('order')
+    
+    # add two new column dr(dense_rank) and sid(row_number)
+    df1 = df.select("*", F.dense_rank().over(w1).alias('dr'), F.row_number().over(w2).alias('sid'))
+    +--------+---+-----+-----+---+---+                                              
+    |Customer| ID| unit|order| dr|sid|
+    +--------+---+-----+-----+---+---+
+    |    John|123|00015|    1|  1|  1|
+    |    John|123|00016|    2|  1|  2|
+    |    John|345|00205|    3|  2|  1|
+    |    John|345|00206|    4|  2|  2|
+    |    John|789|00283|    5|  3|  1|
+    |    John|789|00284|    6|  3|  2|
+    |    John|789|00285|    7|  3|  3|
+    +--------+---+-----+-----+---+---+
+    
+    # find the max dr
+    N = df1.agg(F.max('dr')).first()[0]
+    
+    # groupby Customer, sid and pivot with dr, to find the first of ID, unit, order
+    df_new = df1.groupby('Customer','sid') \
+        .pivot('dr', range(1,N)) \
+        .agg(
+            F.first('ID').alias('ID'), 
+            F.first('unit').alias('unit'),
+            F.first('order').alias('order')
+    )
+    
+    df_new.show()
+    +--------+---+----+------+-------+----+------+-------+----+------+-------+      
+    |Customer|sid|1_ID|1_unit|1_order|2_ID|2_unit|2_order|3_ID|3_unit|3_order|
+    +--------+---+----+------+-------+----+------+-------+----+------+-------+
+    |    John|  1| 123| 00015|      1| 345| 00205|      3| 789| 00283|      5|
+    |    John|  2| 123| 00016|      2| 345| 00206|      4| 789| 00284|      6|
+    |    John|  3|null|  null|   null|null|  null|   null| 789| 00285|      7|
+    +--------+---+----+------+-------+----+------+-------+----+------+-------+
+    
+    # rename the column names if needed
+    df_new.toDF(*['_'.join(reversed(c.split('_'))) for c in df_new.columns]).show()
+    +--------+---+----+------+-------+----+------+-------+----+------+-------+      
+    |Customer|sid|ID_1|unit_1|order_1|ID_2|unit_2|order_2|ID_3|unit_3|order_3|
+    +--------+---+----+------+-------+----+------+-------+----+------+-------+
+    |    John|  1| 123| 00015|      1| 345| 00205|      3| 789| 00283|      5|
+    |    John|  2| 123| 00016|      2| 345| 00206|      4| 789| 00284|      6|
+    |    John|  3|null|  null|   null|null|  null|   null| 789| 00285|      7|
+    +--------+---+----+------+-------+----+------+-------+----+------+-------+
+    
+    
+    
+    
