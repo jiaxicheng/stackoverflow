@@ -13,11 +13,11 @@ Example-1: using dense_rank, row_number to create generic sequence number under 
 
     from pyspark.sql import Window, functions as F
 
-    df = createDataFrame([
-            ('John', '123', '00015', '1'), ('John', '123', '00016', '2'), ('John', '345', '00205', '3'), 
-            ('John', '345', '00206', '4'), ('John', '789', '00283', '5'), ('John', '789', '00284', '6'), 
-            ('John', '789', '00285', '7')
-        , ['Customer', 'ID', 'unit', 'order'])
+    df = spark.createDataFrame([
+        ('John', '123', '00015', '1'), ('John', '123', '00016', '2'), ('John', '345', '00205', '3'), 
+        ('John', '345', '00206', '4'), ('John', '789', '00283', '5'), ('John', '789', '00284', '6'), 
+        ('John', '789', '00285', '7')
+    ], ['Customer', 'ID', 'unit', 'order'])
     
     # WinSpec to get dense_rank of IDs over Customer
     w1 = Window.partitionBy('Customer').orderBy('ID')
@@ -25,7 +25,11 @@ Example-1: using dense_rank, row_number to create generic sequence number under 
     w2 = Window.partitionBy('Customer','ID').orderBy('order')
     
     # add two new column dr(dense_rank) and sid(row_number)
-    df1 = df.select("*", F.dense_rank().over(w1).alias('dr'), F.row_number().over(w2).alias('sid'))
+    df1 = df.select(
+        "*", 
+        F.dense_rank().over(w1).alias('dr'), 
+        F.row_number().over(w2).alias('sid')
+    ).cache()
     +--------+---+-----+-----+---+---+                                              
     |Customer| ID| unit|order| dr|sid|
     +--------+---+-----+-----+---+---+
@@ -43,7 +47,7 @@ Example-1: using dense_rank, row_number to create generic sequence number under 
     
     # groupby Customer, sid and pivot with dr, to find the first of ID, unit, order
     df_new = df1.groupby('Customer','sid') \
-        .pivot('dr', range(1,N)) \
+        .pivot('dr', range(1,N+1)) \
         .agg(
             F.first('ID').alias('ID'), 
             F.first('unit').alias('unit'),
@@ -68,7 +72,4 @@ Example-1: using dense_rank, row_number to create generic sequence number under 
     |    John|  2| 123| 00016|      2| 345| 00206|      4| 789| 00284|      6|
     |    John|  3|null|  null|   null|null|  null|   null| 789| 00285|      7|
     +--------+---+----+------+-------+----+------+-------+----+------+-------+
-    
-    
-    
     
