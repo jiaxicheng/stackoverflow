@@ -53,9 +53,11 @@ Example-2: setting up a when-when-otherwise chain
     data = [('A', '45345', 5), ('C', '55345', 5), ('A', '35345', 10), ('B', '65345', 4)]
     df = spark.createDataFrame(data, ['group', 'id', 'size'])
 
-    set_cat = reduce(lambda d,x: d.when((F.col('group') == x[0])&(F.col('size') < x[1]),x[2]), category_rules, F)
+    set_category = reduce(
+        lambda d,x: d.when((F.col('group') == x[0])&(F.col('size') < x[1]),x[2]), category_rules, F
+    ).otherwise('unknown')
 
-    df.withColumn('category', F.coalesce(set_cat,F.lit('unknown'))).show() 
+    df.withColumn('category', set_category).show() 
     +-----+-----+----+--------+
     |group|   id|size|category|
     +-----+-----+----+--------+
