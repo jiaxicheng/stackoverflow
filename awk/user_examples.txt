@@ -1,0 +1,29 @@
+Task to recap `awk` command lines starting Fall 2021.
+
+---
+Example-1: For MyFitnessPal, convert Food Diary into an CSV file 
+ (1) go to https://www.myfitnesspal.com/food/diary/, select date through `Your Food Diary For:`
+    and then click 'View Full Report (Printable)' button
+ (2) copy the desired table and save it into a text file (food_in.txt in the following example) 
+    using `vim`, this will yield a text file with each food on its own line
+ (3) there are 9 columns in the original table, only the first column might exist SPACEs, to load
+    this into CSV, we want to convert the last 8 spaces into a special char '|', so that we can
+    use Microsoft Excel -> Data -> From Text and then specify '|' as the `Delimiters`
+
+  Following is an `gawk` commond line to do the transformation:
+
+    awk '{for(i=1;i<=NF;i++) printf("%s%s",$i,i<NF-8?OFS:i==NF?"\n":"|")}' food_in.txt > food_out.txt 
+
+Note: Here we iterate through all fields and using `printf` statement to output each field followed by 
+  the original OFS (when i < NF-8), newline "\n" (when i==NF) or otherwise "|".
+
+Caveat: by default, awk using WHITE spaces as IFS and SPACE as OFS, thus consecutive white-spaces inside
+  the first column will be converted into a single SPACE. If you want to keep the original white-spaces
+  as-is, preset the IFS by using 
+
+    awk -F'[ ]' '...' food_in.txt > food_out.txt
+
+  where we use -F'[ ]' to force `awk` to split fields using a single SPACE, thus consecutive SPACEs
+  and TABs will be kept.
+
+
