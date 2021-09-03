@@ -1,0 +1,32 @@
+FOODS   Calories    Carbs   Fat Protein Cholest Sodium  Sugars  Fiber
+Breakfast
+Sugar, 0.13 tsp 2   1g  0g  0g  0mg 0mg 1g  0g
+Indian Head - Stone Ground Yellow Corn Meal, 0.175 cup (30g)    77  16g 1g  1g  --mg    --mg    --g 1g
+Trader Joe's - Unbleached All-Purpose Flour, 0.08 cup (30 g)    33  7g  0g  1g  0mg 0mg 0g  0g
+La Yogurt Probiotic - Vanilla Yogurt, 89 g (5 oz)   73  13g 1g  3g  3mg 44mg    10g --g
+Kirkland Signature - Organic Eggs, 1 egg    70  0g  5g  6g  185mg   70mg    0g  0g
+Hood - Fat Free Milk, 1.2 cup (240ml)   96  16g --g 10g 6mg 150mg   14g --g
+Storehmann - Dutch Country 100% Whole Wheat Bread, 2 slice (38g)    180 36g 2g  8g  0mg 300mg   4g  4g
+Skippy - Extra Crunchy Peanut Butter, 3 tsp (32g)   95  3g  8g  4g  0mg 63mg    2g  1g
+Walls (Berry Farm) - Organic Fruit Spread (Straw Berry), 3 tsp (18g)    35  9g  --g 0g  --mg    5mg 9g  --g
+Lunch
+nature's intent - Organic Chia Seeds, 3 tsp (30g)   50  4g  3g  2g  0mg 2mg 0g  3g
+Ziegler¡¯s - Watermelon Lemonade, 2 oz  27  6g  0g  0g  --mg    --mg    6g  --g
+Frigo - Whole Milk Mozzarella Cheese, 69 g (1oz)    222 --g 17g 15g 49mg    493mg   --g --g
+Trader Joe's - Unbleached All-Purpose Flour, 0.63 cup (30 g)    275 58g 0g  8g  0mg 0mg 0g  0g
+Generic - Broccoli, 41 g    14  3g  0g  1g  0mg 14mg    1g  1g
+Boar's Head - Pepperoni, 8 slices (28g) 70  1g  7g  3g  13mg    245mg   --g --g
+Sweet Baby Ray's - Original Barbecue Sauce (18-oz bottle), 1.5 tbsp (36g)   53  14g 0g  0g  0mg 218mg   13g 0g
+Trader Joe's - Turkey Meatballs, 0.5 meatballs  25  1g  1g  3g  8mg 100mg   0g  1g
+Generic - Baked Sweet Potato, 191 g 172 40g 0g  4g  0mg 69mg    11g 6g
+Dinner
+Season - Skinless & Boneless Sardines in 100% Olive Oil, 0.25 container (85g)   50  0g  3g  6g  14mg    85mg    --g --g
+´¨°ÔÍõ - Homemade szchuan Chili Sauce (¼Ò¾ÓÓÍÀ±×Óµ÷ÁÏ), 10 g    15  2g  0g  1g  4mg 393mg   0g  0g
+Golden Corp - Dried Noodle (É½¶«À­Ãæ), 35 g (2/3 cup)   127 25g 0g  5g  0mg 134mg   0g  1g
+Generic - Baby Spinach, 88 g (3 cups)   21  3g  0g  2g  --mg    67mg    --g 2g
+Generic - Banana, 132 g 117 30g 0g  1g  0mg 1mg 16g 3g
+Snacks
+The Super Scoop - Kiwifruit, 95 g (2 medium kiwifruit)  58  14g 1g  1g  --mg    --mg    8g  3g
+Raw - Almond, 3 almonds (13g)   23  1g  2g  1g  0mg 19mg    0g  0g
+Kirkland Signature - Wildflower Honey, 1 tsp (21g)  20  6g  --g --g --mg    --mg    6g  --g
+Sunny Fruit - Organic Sun-Dried Figs, 1 pieces (40g)    55  14g 0g  1g  0mg 0mg 11g 2g
