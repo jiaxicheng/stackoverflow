@@ -1,7 +1,8 @@
-Task to recap `awk` command lines starting Fall 2021.
+Tasks to recap `awk` command lines starting Fall 2021.
 
 ---
 Example-1: For MyFitnessPal, convert Food Diary into an CSV file 
+ Sample Input: https://github.com/jiaxicheng/stackoverflow/blob/master/awk/data/myfitnesspal_food_in.txt
  (1) go to https://www.myfitnesspal.com/food/diary/, select date through `Your Food Diary For:`
     and then click 'View Full Report (Printable)' button
  (2) copy the desired table and save it into a text file (food_in.txt in the following example) 
@@ -12,7 +13,7 @@ Example-1: For MyFitnessPal, convert Food Diary into an CSV file
 
   Following is an `gawk` commond line to do the transformation:
 
-    awk '{for(i=1;i<=NF;i++) printf("%s%s",$i,i<NF-8?OFS:i==NF?"\n":"|")}' food_in.txt > food_out.txt 
+    awk '{for(i=1;i<=NF;i++) printf("%s%s",$i,i<NF-8?OFS:i==NF?"\n":"|")}' data/myfitnesspal_food_in.txt 
 
 Note: Here we iterate through all fields and using `printf` statement to output each field followed by 
   the original OFS (when i < NF-8), newline "\n" (when i==NF) or otherwise "|".
@@ -21,9 +22,70 @@ Caveat: by default, awk using WHITE spaces as IFS and SPACE as OFS, thus consecu
   the first column will be converted into a single SPACE. If you want to keep the original white-spaces
   as-is, preset the IFS by using 
 
-    awk -F'[ ]' '...' food_in.txt > food_out.txt
+    awk -F'[ ]' '...' data/myfitnesspal_food_in.txt > food_out.txt
 
   where we use -F'[ ]' to force `awk` to split fields using a single SPACE, thus consecutive SPACEs
   and TABs will be kept.
+
+
+---
+Example-2: parse the tracking log copy/paste from an Aliexpress order
+ Sample Input: https://github.com/jiaxicheng/stackoverflow/blob/master/awk/data/aliexpress_tracking_log.txt
+
+    awk '/^2021-/{print x; x="+ " $0; next}NF{x=x" "$0}' data/aliexpress_tracking_log.txt | tac
+
+  Where:
+    (1) print the cached variable x only when a line begins with '2021-' (identify the start of a new entry) 
+    (2) reset x after the above `print` with the current line value $0
+    (3) otherwise concatenate non-EMPTY lines (using condition `NF`) into the variable x
+    (4) pipe to the awk result to `tac` command line to reverse the output lines so the entries sorted chronologically.
+  The result:
+--
++ 2021-08-25 19:29 Parcel dispatched
++ 2021-08-25 21:54 Dispatched from sorting center
++ 2021-08-25 21:54 Customs clearance started
++ 2021-08-26 11:02 Accepted for linehaul transportation
++ 2021-08-28 15:48 Departed country of origin
++ 2021-08-29 01:00 Departed from country of origin
++ 2021-08-29 22:00 Arrived at destination country
++ 2021-08-31 03:00 Clearing Customs Customs clearance successful
++ 2021-08-31 15:12 Received by the delivery company
++ 2021-09-02 18:41 Delivering Arrived at delivery sorting center
+
+
+---
+Example-3: parse the MFP(MyFitnessPal) all-time weight data into CSV
+  (1) download the data 
+     1.1 From Garmin Connect -> Health Stats -> Weight, select '4 Weeks'
+     1.2 Export the data and save the filename to 01.csv
+     1.3 click '<' and then export 4-weeks data into 02.csv
+     1.4 repeat 1.3 until the desired date range reaches
+  (2) scp all files into a sub-folder on an Centos server
+  (3) run the following command pipeline to merge the data
+
+    awk 'FNR>1||NR==FNR{printf("%s%s",$0,/",$/?"":"\n")}' ??.csv | cut -d, -f-6 | sed 's/^" /"/;/^[0-9]/d' > weight-1.txt
+
+    Notes:
+      + use `awk` to merge files and keep title line from only the first file, merge the next line when the current
+        line is ending with a comma ','
+      + use `cut` to keep only the first 6 fields
+      + use `sed` to remove the extra SPACE before the date, and skip lines beginning with a digit [entries from when 
+        more than one weights were saved in the same date]
+
+  (4) run the following bash command to create a list of sequential dates
+
+    d1=2017-07-29
+    while [[ "$d1" != "$d2" ]]; do 
+        echo $(date -d$d1 +'"%b %e, %Y"'); 
+        d1=$(date -d"$d1 + 1 day" +%F); 
+    done | tac > all_date.txt
+
+  (5) compare two lists and check if any missing dates exist in the merged data
+
+    # use vimdiff to visually compare two list, use `sed 1d` to skip the header of file `weight-1.txt`
+    vimdiff all_date.txt <(sed 1d weight-1.txt)
+
+    #the following line create a list of dates that are missing from weight-1.txt
+    awk 'BEGIN{FS=OFS=","}{k=$1$2}FNR==NR{a[k]=1;next}!a[k]' weight-2.txt all_date.txt
 
 
