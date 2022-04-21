@@ -89,3 +89,54 @@ Example-3: parse the MFP(MyFitnessPal) all-time weight data into CSV
     awk 'BEGIN{FS=OFS=","}{k=$1$2}FNR==NR{a[k]=1;next}!a[k]' weight-2.txt all_date.txt
 
 
+---
+Example-4: compare two files and exclude duplicate plus when values are missing
+ REF: https://stackoverflow.com/questions/71588689/compare-two-files-and-store-differences-using-conditional
+ Task: find difference of file2.txt from file1.txt, as an exception, when the 2nd field is a double quote "
+       , set to be equal. Both files are semi-comma ';' delimited fields. 
+ Data:
+file1.txt:
+---
+"SWITCH1";"rack7";"Datacenter1"
+"SWTICH46";"rack1";"rack1"
+"ROUTER3";"";"rack1"
+"SWITCH7";"rack1";"rack1"
+"ROUTER9";"rack1";"rack1"
+"ROUTER22";"rack1";"Datacenter4"
+
+file2.txt:
+---
+"SWITCH1";"rack7";"Datacenter1"
+"ROUTER22";";"Datacenter4"
+"SWITCH51";"rack7";"Datacenter2"
+
+  Solution:
+
+    awk -F';' '{k=$1","$3}FNR==NR{a[k]="|"$2;next}$2!~"^(\"|"a[k]")$"' file1.txt file2.txt
+
+  Result (1 line from the sample file2.txt is returned):
+"SWITCH51";"rack7";"Datacenter2"
+
+  Notes:
+   (1) create an associative array with key as $1+$3, values as all concatenated $2 delimited by '|'
+       notice there is a leading '|' on each value.
+   (2) going through file1.txt to create this array `a`
+   (3) set the pattern as `^(\"` concatenate with `a[k]` and then `)$`, this will create 
+       a pattern like the following:
+
+           ^("|$2_1|$2_2|$3_3)$
+
+       where $2_1, $2_2, $2_3 are values with the same key($1+$3) in file1.txt
+
+   (4) use the pattern matching to skip matched rows
+ 
+   This solution is for gawk, and values of $2 in file1.txt should not contain regex metacharacters.
+
+  ** Notice if there is no duplicate $1+$3 in file1.txt, we can skip the regex solution and use assiciative array only:
+
+    awk -F';' '{k=$1 FS $3}FNR==NR{a[k]=$2;next} !($2==a[k] || $2 == "\"")' file1.txt file2.txt
+
+     the skip condition will be the negate of `($2==a[k] || $2 == "\"")`
+
+
+
