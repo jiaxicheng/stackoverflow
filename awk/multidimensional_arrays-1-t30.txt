@@ -35,3 +35,47 @@ END {
     }
   }
 }
+
+
+#Another similar question from Apr2022:
+# REF https://stackoverflow.com/q/71960266/3043253
+# cat script3_4.awk
+
+BEGIN { FS="," }
+
+{ medal_total += $9+$10+$11 }
+$3 != country {next}
+
+{
+    height[$4] = height[$4] == "" ? $6 : height[$4] FS $6
+    weight[$4] = weight[$4] == "" ? $7 : weight[$4] FS $7
+    height_total[$4] += $6
+    weight_total[$4] += $7
+    medals[$4] += $9+$10+$11
+}
+
+END {
+    printf("Country,Sex,Weight_avg,Weight_std,Height_avg,Height_std,% Medals\n")
+    for (i in weight) {
+      /* calculate mean and std for weight */
+      n = split(weight[i], vals)
+      e_w = weight_total[i]/n
+      s_w = 0;
+      for(x in vals) s_w += (vals[x]-e_w)**2;
+      s_w = n==1 ? 0 : sqrt(s_w/(n-1))
+
+      /* calculate mean and std for height */
+      n = split(height[i], vals)
+      e_h = height_total[i]/n
+      s_h = 0;
+      for(x in vals) s_h += (vals[x]-e_h)**2;
+      s_h = n==1 ? 0 : sqrt(s_h/(n-1))
+
+      /* calculate medal percent */
+      m_p = medals[i]*100/medal_total
+
+      /* output */
+      printf("%s,%s,%.4f Kg,%.4f,%.4f m,%.4f,%.4f%%\n",country,i,e_w,s_w,e_h,s_h,m_p)
+    }
+}
+
