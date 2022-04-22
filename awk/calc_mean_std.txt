@@ -1,0 +1,100 @@
+# XiCheng Jia @ New York  2022/04/22
+# awk code to calculate standard deviation and mean for several columns
+# REF https://stackoverflow.com/q/71960266/3043253
+# Run with the following command:
+# $ awk -f script3_4.awk country=USA athletesv2.csv
+# $ cat script3_4.awk
+
+BEGIN { FS="," }
+
+{ medal_total += $9+$10+$11 }
+$3 != country {next}
+
+{
+    height[$4] = height[$4] == "" ? $6 : height[$4] FS $6
+    weight[$4] = weight[$4] == "" ? $7 : weight[$4] FS $7
+    height_total[$4] += $6
+    weight_total[$4] += $7
+    medals[$4] += $9+$10+$11
+}
+
+END {
+    printf("Country,Sex,Weight_avg,Weight_std,Height_avg,Height_std,% Medals\n")
+    for (i in weight) {
+      /* calculate mean and std for weight */
+      n = split(weight[i], vals)
+      e_w = weight_total[i]/n
+      s_w = 0;
+      for(x in vals) s_w += (vals[x]-e_w)**2;
+      s_w = n==1 ? 0 : sqrt(s_w/(n-1))
+
+      /* calculate mean and std for height */
+      n = split(height[i], vals)
+      e_h = height_total[i]/n
+      s_h = 0;
+      for(x in vals) s_h += (vals[x]-e_h)**2;
+      s_h = n==1 ? 0 : sqrt(s_h/(n-1))
+
+      /* calculate medal percent */
+      m_p = medals[i]*100/medal_total
+
+      /* output */
+      printf("%s,%s,%.4f Kg,%.4f,%.4f m,%.4f,%.4f%%\n",country,i,e_w,s_w,e_h,s_h,m_p)
+    }
+}
+
+###############################################################################
+## When there are many columns to comput, try using multi-dimensional arrays ##
+###############################################################################
+# cat script3_4.awk
+
+BEGIN { 
+    FS=","; 
+    /* initialize fields to be an array of two elements identify column number of weight(7) and height(6) */
+    split("7 6",fields) 
+}
+
+{ medal_total += $9+$10+$11 }
+$3 != country {next}
+
+{
+    for (f in fields) {
+      stats[$4,f] = stats[$4,f] == "" ? $f : stats[$4,f] FS $f
+      stats_total[$4,f] += $f
+    }
+    medals[$4] += $9+$10+$11
+}
+
+END {
+    printf("Country,Sex,Weight_avg,Weight_std,Height_avg,Height_std,% Medals\n")
+    for (i in medals) {
+      printf("%s,%s,",country,i)
+      /* notice that we can not use f in fields here since the order of keys are non-deterministic */
+      for (j=1;j<=2;j++) {
+        f = fields[j]
+        n = split(stats[i,f], vals)
+        /* calculate mean for weight(f=7) and height(f=6) */
+        e = stats_total[i]/n
+        /* calculate std for weight(f=7) and height(f=6) */
+        s = 0;
+        for(x in vals) s += (vals[x]-e)**2;
+        s = n==1 ? 0 : sqrt(s/(n-1))
+        /* output std and mean for weight and then height */
+        printf("%.4f %s,%.4f,",e,f==7?"Kg":"m",s)
+      }
+      printf("%.4f\n", medals[i]*100/medal_total)
+    }
+}
+
+### Sample athletesv2.csv
+#id,name,nationality,sex,date_of_birth,height,weight,sport,gold,silver,bronze,info
+#736041664,A Jesus Garcia,ESP,male,1969-10-17,1.72,64,athletics,1,0,0,
+#435962603,Aaron Brown,USA,male,1992-05-27,1.98,79,athletics,0,1,2,
+#266237702,Aaron Russell,USA,male,1993-06-04,2.05,98,volleyball,0,0,1,
+#87689776,Aauri Lorena Bokesa,ESP,female,1988-12-14,1.80,62,athletics,0,1,0,
+#997877719,Ababel Yeshaneh,ETH,female,1991-07-22,1.65,54,athletics,1,0,0,
+#343694681,Abadi Hadis,ETH,male,1997-11-06,1.70,63,athletics,0,4,0,
+#376068084,Abbey D'Agostino,USA,female,1992-05-25,1.61,49,athletics,0,0,1,
+#162792594,Abbey Weitzeil,USA,female,1996-12-03,1.78,68,aquatics,1,1,0,
+#803161695,Abdelaziz Merzougui,ESP,male,1991-08-30,1.75,67,athletics,1,0,1,
+
