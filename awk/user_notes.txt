@@ -1,0 +1,13 @@
+Useful and interesting tips for `awk` command:
+
+(1) for gawk, FS can be reset at Line level in the code (instead in the BEGIN block) and then reset $0 and $N
+    example: https://stackoverflow.com/questions/71956933/awk-2-prints-with-different-separators-from-the-same-file
+
+        echo '"58062","2022-03-23 10:07:21.718670","Standard query 0x04c0 AAAA contoso.local"' |
+            awk -F',' '{FS="[ \t\"]*"; $0=$3; print $(NF-1)}'
+        #contoso.local
+    Firstly, read line in and split fields by comma, and then set FS as `[ \t\"]*` and reset $0 using the value of $3
+    finally print the second to the last field value $(NF-1)
+
+
+
