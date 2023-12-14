@@ -408,9 +408,9 @@ Example-8: Aggreate rows into time-buckets
     df1 = df.selectExpr(
         "sensor_uuid", 
         """
-          inline(
+          inline_outer(
             transform(
-              sequence(date_trunc('hour',from_timestamp), date_trunc('hour',to_timestamp), interval 1 hours), 
+              sequence(date_trunc('hour',from_timestamp), to_timestamp, interval 1 hours), 
               x -> struct(
                 greatest(x, from_timestamp) as start, 
                 least(x+interval 3599 seconds, to_timestamp) as end, 
