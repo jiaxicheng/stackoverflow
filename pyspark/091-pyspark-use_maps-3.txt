@@ -1,0 +1,42 @@
+Use Map:
+
+
+Example-7: (using column as the map key)
+  aggregate a column based on the values from another column: Get a list of ids grouped 
+  by the values from columns specified in `var_col_name`
+
+  REF: https://stackoverflow.com/questions/77593276/pyspark-to-aggregate-a-column-based-on-the-column
+  
+    from pyspark.sql import functions as F
+    from pyspark.sql.window import Window
+
+    # sample dataframe
+    df = spark.createDataFrame([
+        ('a', 1, 'text1', 'col1', 'texts1', 'scj', 'dsiul'),
+        ('a', 11, 'text1', 'col1', 'texts1', 'ftjjjjjjj', 'jhkl'),
+        ('b', 2, 'bigger text', 'next_col', 'gfsajh', 'xcj', 'biggest text'),
+        ('b', 21, 'bigger text', 'next_col', 'fghm', 'hjjkl', 'ghjljkk'),
+        ('c', 3, 'soon', 'column', 'szjcj', 'sooner', 'sjdsk')
+     ], ['name', 'id', 'txt', 'var_col_name', 'col1', 'column', 'next_col'])
+    
+
+    # specify Window partitioned by the value of a map 'm'
+    w = Window.partitionBy(F.expr('m[var_col_name]'))
+
+    # define map 'm' with the columns, and then use Window function to group values based on `m[var_col_name]`
+    df_new = df.withColumn('m', F.expr("map('col1', col1, 'next_col', next_col, 'column', column)")) \
+               .withColumn('id_all', F.collect_list('id').over(w1))    
+    
+    # df_new.show()
+    +----+---+-----------+------------+------+---------+------------+--------------------+-------+
+    |name| id|        txt|var_col_name|  col1|   column|    next_col|                   m| id_all|
+    +----+---+-----------+------------+------+---------+------------+--------------------+-------+
+    |   b|  2|bigger text|    next_col|gfsajh|      xcj|biggest text|{col1 -> gfsajh, ...|    [2]|
+    |   b| 21|bigger text|    next_col|  fghm|    hjjkl|     ghjljkk|{col1 -> fghm, ne...|   [21]|
+    |   c|  3|       soon|      column| szjcj|   sooner|       sjdsk|{col1 -> szjcj, n...|    [3]|
+    |   a|  1|      text1|        col1|texts1|      scj|       dsiul|{col1 -> texts1, ...|[1, 11]|
+    |   a| 11|      text1|        col1|texts1|ftjjjjjjj|        jhkl|{col1 -> texts1, ...|[1, 11]|
+    +----+---+-----------+------------+------+---------+------------+--------------------+-------+
+
+
+
