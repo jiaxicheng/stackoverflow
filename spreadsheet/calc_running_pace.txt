@@ -1,0 +1,39 @@
+GoogleSheet formular to convert running speed (mph or mile per hour) into running pace (minutes per mile)
+or from running distance (column `miles`) and running time (column `minutes`)
+
+(1) from mph to pace
+
+   =Text(1/mph/24, "m:ss:000")     
+
+this will convert mph=7.35 into `8:09:796`
+
+
+(2) the following do the same from miles and minutes
+
+   =Text(minutes/miles/1440, "m:ss:000")
+
+Note, in Pivot table, add a calculated field:
+  
+     Values -> Columns -> Add  -> Calculated Field
+
+  Formula
+     
+     =minutes/miles/1440
+
+  Summarized by: SUM
+  Show as: Default
+
+And then format the column w/
+
+  Format -> Number -> Custom date and time 
+
+Here you can select 
+   Minute(1) - Minutes without leading zero
+   Second(01) - Second with leading zero
+   Millisecond(001) - Precision of 1/1000 of a second(001)
+
+
+Note: The key is to convert the minutes/mile or hours/mile into days/mile, and then use Text()
+      function to format the datetime field with specific format, in our case `m:ss:000`
+
+
