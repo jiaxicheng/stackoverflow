@@ -10,4 +10,33 @@ Useful and interesting tips for `awk` command:
     finally print the second to the last field value $(NF-1)
 
 
+(2) Convert named Months into number, similar to weekdays:
+    example: https://stackoverflow.com/questions/78297014/how-to-convert-initial-timestamp-of-each-line
+
+    $ cat test.log
+    [Tue Apr  9 03:32:21 2024] {cmd1}
+    [Tue Apr  9 03:33:42 2024] {cmd2}
+    [Tue Apr  9 03:35:51 2024] {cmd3}
+
+  Method-1: using index() function
+
+    awk -F'[][{} ]*' '{
+        mth=(index("JanFebMarAprMayJunJulAugSepOctNovDec",$3)+2)/3;     #<---- using index() function
+        printf("%04d-%02d-%02d %s %s\n",$6,mth,$4,$5,$7)
+    }' test.log
+
+    this commnad yields:
+    2024-04-09 03:32:21 cmd1
+    2024-04-09 03:33:42 cmd2
+    2024-04-09 03:35:51 cmd3
+
+  Method-2: using patsplit() function (gawk 4.0+)
+    awk -F'[][{} ]*' '
+        BEGIN{
+          n=patsplit("JanFebMarAprMayJunJulAugSepOctNovDec",m,/.../);
+          for(i=1;i<=n;i++) mths[m[i]]=i
+        }{
+          printf("%04d-%02d-%02d %s %s\n",$6,mths[$3],$4,$5,$7)
+    }' test.log
+
 
