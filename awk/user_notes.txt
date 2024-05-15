@@ -39,4 +39,14 @@ Useful and interesting tips for `awk` command:
           printf("%04d-%02d-%02d %s %s\n",$6,mths[$3],$4,$5,$7)
     }' test.log
 
+  Method-3: just using split() funciton but organize the months name differently:
 
+    awk -F'[][{} ]*' '
+        BEGIN{
+          n=split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec",m);
+          for(i=1;i<=n;i++) mths[m[i]]=i
+        }{
+          printf("%04d-%02d-%02d %s %s\n",$6,mths[$3],$4,$5,$7)
+    }' test.log
+
+    
