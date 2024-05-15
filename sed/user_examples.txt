@@ -1,0 +1,54 @@
+--
+
+Example-1: Remove collapsible blocks from a text file(Asciidoctor documents) 
+    - using N command to do pattern match cross multiple lines
+
+snippet of sample data `18.txt`: 
+---
+.Click to reveal the answer
+[%collapsible]
+====
+This is the answer.
+====
+
+REF: https://stackoverflow.com/questions/78389006/remove-multi-line-pattern-with-sed
+       https://docs.asciidoctor.org/asciidoc/latest/blocks/collapsible/
+
+  sed '
+    /^\..*/{                                # line started with a dot
+      N;N;                                  # append the next two lines into the pattern space
+      /\n\[%collapsible\]\n====$/{          # if match
+        :t N;/\n====$/!bt;                  # append new lines until pattern matched /\n====$/
+        d                                   # delete the pattern space
+      }
+    }' 18.txt
+
+in one-line mode:
+
+    sed '/^\..*/{N;N;/\n\[%collapsible\]\n====$/{:t N;/\n====$/!bt;d}}' 18.txt
+
+Notes:
+  (1) `N` command is important to read multiple lines into the pattern space for mutlline pattern matching
+     be careful using with sed -n '...;p', if no more input for `N`, sed will exist without processing any more
+     commands. In this example, if any of the last two lines started with dot, they will be skipped.
+
+    sed -n '/^\..*/{N;N;/\n\[%collapsible\]\n====$/{:t N;/\n====$/!bt;d}};p' 18.txt
+
+  (2) `z` command (GNU sed specific) can be used to replace `d`, but will have an extra new line for replaced 
+     block.
+
+Similar example: Example-1-2: concatenate lines with word-wrapped at 50 chars
+   https://stackoverflow.com/questions/78379452/how-to-remove-all-crlfs-at-position-50
+
+  sed -E '
+      /^.{,50}$/{          # matches line with 50 chars
+        :t N;              # append the next line until
+        /;$/!bt;           # the line containg trailing `;`
+        s/\n//g            # remove all newlines in the pattern space
+      }
+  ' file.txt
+
+    sed -E '/^.{50}$/{:t N;/;$/!bt;s/\n//g}' file.txt
+
+
+
