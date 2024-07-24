@@ -50,3 +50,17 @@ Useful and interesting tips for `awk` command:
     }' test.log
 
     
+(3) about the semicolons, the following two command lines, 2nd one has an extra semicolon which makes
+    two command line do complete different things:
+
+    awk 'FNR==NR{a[$1];next}$1 in a{f=0;next}f{f=1}' 4-2.txt 4.txt
+    awk 'FNR==NR{a[$1];next}$1 in a{f=0;next}f;{f=1}' 4-2.txt 4.txt
+
+  the `f` in the 1st command line servers as a pattern, meaning if f is true, then do `{f=1}`
+  the `f` in the 2nd command line is the same as `{print $0}` and is not a pattern to execute the next block `{f=1}`
+
+  Make sure the presence of semicolon will make the code work correctly.
+
+  REF: https://stackoverflow.com/questions/78788854
+
+
